@@ -1,0 +1,95 @@
+from pathlib import Path
+
+import numpy as np
+import pytest
+import torch
+
+from tinylm.data.dataset import TokenDataset
+from tinylm.model import GPT, GPTConfig
+from tinylm.training import TrainConfig, Trainer
+
+
+def make_synthetic_bin(
+    path: Path, vocab_size: int, num_tokens: int, pattern_len: int, seed: int = 0
+) -> None:
+    """A repeating pattern is trivially learnable, so a tiny model's loss
+    should clearly drop within a handful of steps -- a real, checkable signal
+    rather than just 'it ran without crashing'."""
+    rng = np.random.default_rng(seed)
+    pattern = rng.integers(0, vocab_size, size=pattern_len)
+    reps = num_tokens // pattern_len + 1
+    ids = np.tile(pattern, reps)[:num_tokens].astype(np.uint16)
+    ids.tofile(path)
+
+
+def test_training_reduces_loss_on_repetitive_pattern(tmp_path: Path) -> None:
+    torch.manual_seed(0)
+    vocab_size = 32
+    block_size = 16
+
+    train_path = tmp_path / "train.bin"
+    val_path = tmp_path / "val.bin"
+    make_synthetic_bin(train_path, vocab_size, num_tokens=4000, pattern_len=block_size, seed=0)
+    make_synthetic_bin(val_path, vocab_size, num_tokens=1000, pattern_len=block_size, seed=0)
+
+    train_data = TokenDataset(train_path, block_size)
+    val_data = TokenDataset(val_path, block_size)
+
+    model_config = GPTConfig(
+        vocab_size=vocab_size, block_size=block_size, n_layer=2, n_head=2, n_embd=32, dropout=0.0
+    )
+    model = GPT(model_config)
+
+    train_config = TrainConfig(
+        out_dir=str(tmp_path / "run"),
+        max_steps=150,
+        warmup_steps=10,
+        batch_size=16,
+        max_lr=3e-3,
+        eval_interval=25,
+        eval_iters=5,
+        device="cpu",
+    )
+
+    trainer = Trainer(model, model_config, train_config, train_data, val_data)
+    result = trainer.train()
+
+    metrics = result["metrics"]
+    assert len(metrics) >= 2
+    assert all(m["train_loss"] == m["train_loss"] for m in metrics)  # NaN != NaN
+    assert metrics[-1]["train_loss"] < metrics[0]["train_loss"]
+
+    assert (tmp_path / "run" / "best.pt").exists()
+    assert (tmp_path / "run" / "last.pt").exists()
+    assert (tmp_path / "run" / "metrics.jsonl").exists()
+
+
+def test_diverging_loss_raises_clear_error(tmp_path: Path) -> None:
+    vocab_size = 32
+    block_size = 8
+    train_path = tmp_path / "train.bin"
+    val_path = tmp_path / "val.bin"
+    make_synthetic_bin(train_path, vocab_size, num_tokens=2000, pattern_len=block_size, seed=0)
+    make_synthetic_bin(val_path, vocab_size, num_tokens=500, pattern_len=block_size, seed=0)
+
+    train_data = TokenDataset(train_path, block_size)
+    val_data = TokenDataset(val_path, block_size)
+    model_config = GPTConfig(
+        vocab_size=vocab_size, block_size=block_size, n_layer=1, n_head=1, n_embd=8, dropout=0.0
+    )
+    model = GPT(model_config)
+
+    train_config = TrainConfig(
+        out_dir=str(tmp_path / "run_diverge"),
+        max_steps=20,
+        warmup_steps=1,
+        batch_size=8,
+        max_lr=1e6,
+        eval_interval=100,
+        eval_iters=2,
+        device="cpu",
+    )
+    trainer = Trainer(model, model_config, train_config, train_data, val_data)
+
+    with pytest.raises(RuntimeError, match="diverged"):
+        trainer.train()
