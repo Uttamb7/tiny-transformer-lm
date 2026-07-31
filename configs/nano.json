@@ -1,0 +1,21 @@
+{
+  "model": {
+    "block_size": 128,
+    "n_layer": 2,
+    "n_head": 2,
+    "n_embd": 64,
+    "dropout": 0.1,
+    "bias": true
+  },
+  "train": {
+    "max_steps": 1000,
+    "warmup_steps": 50,
+    "batch_size": 64,
+    "max_lr": 0.001,
+    "weight_decay": 0.1,
+    "grad_clip": 1.0,
+    "eval_interval": 100,
+    "eval_iters": 30,
+    "seed": 1337
+  }
+}
