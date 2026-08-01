@@ -97,7 +97,7 @@ Attention benchmark (batch=32, block=256, n_head=6, n_embd=384, 100 iters, RTX 4
 | manual (explicit QK^T + softmax) | 168.4 | 1.0x |
 | fused `scaled_dot_product_attention` | 387.6 | 2.30x |
 
-Sample generation (tiny config, prompt `"ROMEO:"`, temperature 0.8, top-k 50, seed 42):
+Sample generation (tiny config, prompt `"ROMEO:"`, temperature 0.5, top-k 50, seed 42):
 
 ```
 ROMEO:
