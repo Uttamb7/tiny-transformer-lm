@@ -101,13 +101,17 @@ Sample generation (tiny config, prompt `"ROMEO:"`, temperature 0.5, top-k 50, se
 
 ```
 ROMEO:
-Amerley, my mother, this fortune, King of Buckingham
-Thran is the duke of John Jove; in then,
-And holf the sallest to swear of courtled cold,
-My father'st burn of his son, and welcome humber,
-Or ere I rather hath repent of my life,
-The slain, as the most grave and repation
-That I have done to his s
+Ay, art thou, very let'st thousand and true.
+
+ROMEO:
+It is a word, and I will never be than it in then,
+And let me see him took.
+
+KING RICHARD II:
+Reland, madam, it is in a sacred words and
+And Bolingbroke his son, and not the pardon
+It is a plainted and Henry Saint Henry,
+That I may see his s
 ```
 
 Test coverage: 88% line coverage on `tinylm/` (`pytest --cov`); the untested module is `data/prepare.py`, which is thin glue around the (separately unit-tested) tokenizer training/save calls plus a network download, and is instead exercised directly via `scripts/prepare_data.py`.
