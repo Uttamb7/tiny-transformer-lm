@@ -12,7 +12,7 @@ Most of my other projects are full-stack/backend work (React, Next.js, FastAPI, 
 - Causal multi-head self-attention implemented manually (explicit QK^T / mask / softmax), with an optional fused `scaled_dot_product_attention` path for a measured speed comparison
 - Configurable model sizes (nano / tiny / small) via JSON configs
 - Training loop with AdamW, linear warmup + cosine LR decay, gradient clipping, NaN/divergence detection, and periodic checkpointing (best + last)
-- Text generation with temperature / top-k / top-p sampling
+- Text generation with temperature / top-k / top-p sampling and optional end-token stopping
 - Evaluation tooling: exact validation perplexity, cross-config comparison reports, manual-vs-fused attention benchmarks
 
 ## Technology stack
@@ -60,11 +60,22 @@ python scripts/train.py --config tiny
 # 3. Generate text from a checkpoint
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --max-new-tokens 200
 
+# Optional: stop when a tokenizer special token is generated
+python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --eos-token "<|endoftext|>"
+
 # 4. Evaluate / compare
 python scripts/evaluate.py eval --checkpoint runs/tiny/best.pt
 python scripts/evaluate.py compare runs/nano runs/tiny runs/small
 python scripts/evaluate.py benchmark-attn --device cuda
 ```
+
+Generation uses the full token budget by default. `--eos-token` must name a special
+token in the loaded tokenizer; the generated end token is retained in the output.
+The library equivalent is `GPT.generate(..., eos_token_id=token_id)`: each batch
+row stops at its first newly generated end token and is padded with that token
+until all rows finish or the budget runs out. End tokens already in the prompt
+do not stop a new completion. Existing TinyShakespeare training does not insert
+document-boundary tokens, so stopping does not teach those checkpoints when to end.
 
 ## Test
 
@@ -74,7 +85,7 @@ mypy tinylm scripts
 pytest -q --cov=tinylm --cov-report=term-missing
 ```
 
-32 tests covering: BPE encode/decode round-trip (including empty strings and non-ASCII text), causal-mask correctness (perturbing future tokens must not change earlier outputs), manual-vs-fused attention numerical agreement, model forward-shape and weight-tying checks, LR schedule math, checkpoint save/load equivalence, an integration smoke test that trains a tiny model on a synthetic repeating pattern and asserts loss actually drops, and a divergence test that asserts a runaway learning rate raises a clear error instead of silently producing NaNs.
+Tests cover: BPE encode/decode round-trip (including empty strings and non-ASCII text), causal-mask correctness (perturbing future tokens must not change earlier outputs), manual-vs-fused attention numerical agreement, model forward-shape and weight-tying checks, optional end-token stopping (including batched padding and CLI behavior), LR schedule math, checkpoint save/load equivalence, an integration smoke test that trains a tiny model on a synthetic repeating pattern and asserts loss actually drops, and a divergence test that asserts a runaway learning rate raises a clear error instead of silently producing NaNs.
 
 ## Verified results
 

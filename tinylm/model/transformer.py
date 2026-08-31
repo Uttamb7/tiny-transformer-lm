@@ -101,8 +101,21 @@ class GPT(nn.Module):
         temperature: float = 1.0,
         top_k: int | None = None,
         top_p: float | None = None,
+        eos_token_id: int | None = None,
     ) -> torch.Tensor:
+        """Append tokens, optionally stopping each row at a newly generated EOS.
+
+        Finished rows retain EOS and are padded with it until every row finishes
+        or the token budget is exhausted. EOS tokens in the prompt are ignored.
+        """
+        if eos_token_id is not None and (
+            not isinstance(eos_token_id, int)
+            or isinstance(eos_token_id, bool)
+            or not 0 <= eos_token_id < self.config.vocab_size
+        ):
+            raise ValueError("eos_token_id must be an integer within the model vocabulary")
         self.eval()
+        finished = torch.zeros(idx.size(0), dtype=torch.bool, device=idx.device)
         for _ in range(max_new_tokens):
             if idx.size(1) <= self.config.block_size:
                 idx_cond = idx
@@ -127,5 +140,10 @@ class GPT(nn.Module):
 
             probs = F.softmax(logits, dim=-1)
             next_id = torch.multinomial(probs, num_samples=1)
+            if eos_token_id is not None:
+                next_id = next_id.masked_fill(finished[:, None], eos_token_id)
+                finished |= next_id.squeeze(-1) == eos_token_id
             idx = torch.cat((idx, next_id), dim=1)
+            if eos_token_id is not None and finished.all():
+                break
         return idx

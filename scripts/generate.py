@@ -38,6 +38,10 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top-k", type=int, default=50)
     parser.add_argument("--top-p", type=float, default=None)
+    parser.add_argument(
+        "--eos-token", type=str, default=None,
+        help="stop after generating this tokenizer special token (e.g. <|endoftext|>)",
+    )
     parser.add_argument("--seed", type=int, default=None)
     default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser.add_argument("--device", type=str, default=default_device)
@@ -47,6 +51,9 @@ def main() -> None:
         torch.manual_seed(args.seed)
 
     tokenizer = ByteLevelBPETokenizer.load(args.tokenizer)
+    if args.eos_token is not None and args.eos_token not in tokenizer.special_tokens:
+        parser.error(f"unknown special token: {args.eos_token!r}")
+    eos_token_id = tokenizer.special_tokens.get(args.eos_token)
     model, ckpt = load_model(args.checkpoint, args.device)
 
     print(f"loaded checkpoint from step {ckpt['step']} (val_loss={ckpt['val_loss']:.4f})")
@@ -60,6 +67,7 @@ def main() -> None:
         temperature=args.temperature,
         top_k=args.top_k,
         top_p=args.top_p,
+        eos_token_id=eos_token_id,
     )
     print(tokenizer.decode(out_ids[0].tolist()))
 
