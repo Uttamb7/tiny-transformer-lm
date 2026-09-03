@@ -8,10 +8,41 @@ alive and slowly grows the process's memory footprint over long training runs.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
 import torch
+
+
+def iter_eval_batches(
+    bin_path: str | Path, block_size: int, batch_size: int, device: str
+) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+    """Score every next-token target once, resetting context at each block.
+
+    Full blocks are batched; a shorter final block is yielded separately so
+    no target is dropped or padded. Only the current batch is copied into RAM.
+    """
+    if block_size < 1 or batch_size < 1:
+        raise ValueError("block_size and batch_size must be positive")
+    path = Path(bin_path)
+    size = path.stat().st_size
+    if size % 2:
+        raise ValueError("validation file must contain complete uint16 tokens")
+    if size < 4:
+        raise ValueError("validation file must contain at least two tokens")
+    data = np.memmap(path, dtype=np.uint16, mode="r")
+    targets = len(data) - 1
+    full_end = targets - targets % block_size
+    for start in range(0, full_end, batch_size * block_size):
+        end = min(start + batch_size * block_size, full_end)
+        x = torch.from_numpy(data[start:end].astype(np.int64)).reshape(-1, block_size)
+        y = torch.from_numpy(data[start + 1 : end + 1].astype(np.int64)).reshape(-1, block_size)
+        yield x.to(device), y.to(device)
+    if full_end < targets:
+        x = torch.from_numpy(data[full_end:-1].astype(np.int64)).unsqueeze(0)
+        y = torch.from_numpy(data[full_end + 1 :].astype(np.int64)).unsqueeze(0)
+        yield x.to(device), y.to(device)
 
 
 class TokenDataset:

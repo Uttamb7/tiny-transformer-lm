@@ -15,7 +15,7 @@ from pathlib import Path
 
 import torch
 
-from tinylm.data.dataset import TokenDataset
+from tinylm.data.dataset import iter_eval_batches
 from tinylm.model import GPT, GPTConfig
 from tinylm.model.attention import CausalSelfAttention
 
@@ -23,6 +23,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def cmd_eval(args: argparse.Namespace) -> None:
+    if args.batch_size < 1:
+        raise ValueError("batch_size must be positive")
     device = args.device
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
     config = GPTConfig.from_dict(ckpt["model_config"])
@@ -31,19 +33,24 @@ def cmd_eval(args: argparse.Namespace) -> None:
     model.to(device)
     model.eval()
 
-    val_data = TokenDataset(args.data_dir / "val.bin", config.block_size)
-    num_batches = max(1, len(val_data) // (args.batch_size * config.block_size))
-
     total_loss = 0.0
-    generator = torch.Generator().manual_seed(0)
+    num_tokens = 0
+    num_batches = 0
     with torch.no_grad():
-        for _ in range(num_batches):
-            x, y = val_data.get_batch(args.batch_size, device, generator)
+        for x, y in iter_eval_batches(
+            args.data_dir / "val.bin", config.block_size, args.batch_size, device
+        ):
             _, loss = model(x, y)
-            total_loss += loss.item()
-    avg_loss = total_loss / num_batches
-    perplexity = math.exp(min(avg_loss, 20))
-    result = {"val_loss": avg_loss, "val_perplexity": perplexity, "num_batches": num_batches}
+            total_loss += loss.item() * y.numel()
+            num_tokens += y.numel()
+            num_batches += 1
+    avg_loss = total_loss / num_tokens
+    if not math.isfinite(avg_loss):
+        raise ValueError("evaluation produced a non-finite loss")
+    perplexity = math.exp(avg_loss)
+    result = {"val_loss": avg_loss, "val_perplexity": perplexity,
+              "num_batches": num_batches, "num_tokens": num_tokens,
+              "method": "non_overlapping_blocks", "block_size": config.block_size}
     print(json.dumps(result, indent=2))
 
 
@@ -147,7 +154,10 @@ def main() -> None:
     p_bench.set_defaults(func=cmd_benchmark_attn)
 
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except (ValueError, OverflowError) as error:
+        parser.error(str(error))
 
 
 if __name__ == "__main__":

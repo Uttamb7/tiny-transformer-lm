@@ -77,6 +77,14 @@ until all rows finish or the budget runs out. End tokens already in the prompt
 do not stop a new completion. Existing TinyShakespeare training does not insert
 document-boundary tokens, so stopping does not teach those checkpoints when to end.
 
+`evaluate.py eval` scores every next-token target exactly once in deterministic,
+non-overlapping blocks, resetting context and position indices at each block.
+It includes the final partial block and weights loss by target count; JSON output
+reports `num_tokens` (file tokens minus one), `num_batches`, `block_size`, and
+`method`. `--batch-size` controls memory usage without changing target coverage.
+This is full-set evaluation with block-local context, not sliding-window perplexity.
+Validation files need at least two uint16 tokens. Training still uses sampled windows.
+
 ## Test
 
 ```bash
@@ -97,7 +105,10 @@ All numbers below were produced by actually running the commands above on this m
 | tiny   | 859,008             | 2.887    | 17.93           | 134.8s     | cuda   |
 | small  | 10,844,544          | 2.843    | 17.16           | 1036.0s    | cuda   |
 
-(val loss/perplexity computed exactly over the full validation set via `scripts/evaluate.py eval`, not the sampled estimate used during training)
+(Historical val loss/perplexity above came from the previous `scripts/evaluate.py eval`,
+which sampled random windows rather than covering the full validation set. These
+numbers have not been recomputed with the deterministic evaluator and should not
+be compared directly with its results.)
 
 **Diminishing returns**: small has 12.6x the parameters of tiny and trains 7.7x longer, but only improves validation perplexity from 17.93 to 17.16 (4.3%). Its training curve (`runs/small/metrics.jsonl`) also shows the best checkpoint landing at step 1500/5000 — validation loss bottoms out at 2.833 and then rises again while training loss keeps falling, i.e. the model overfits the ~518K-token training set well before `max_steps` is reached. The `Trainer` saves `best.pt` on every validation improvement specifically so this doesn't require early-stopping logic to still get the best checkpoint. On a corpus this small, model capacity beyond "tiny" buys very little, and the config comparison is what surfaces that instead of assuming bigger is better.
 
