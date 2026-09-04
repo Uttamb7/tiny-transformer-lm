@@ -29,7 +29,16 @@ def main() -> None:
     default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser.add_argument("--device", type=str, default=default_device)
     parser.add_argument("--use-fused-attn", action="store_true")
+    parser.add_argument(
+        "--grad-accum-steps",
+        type=int,
+        default=None,
+        help="micro-batches to average per optimizer step",
+    )
     args = parser.parse_args()
+
+    if args.grad_accum_steps is not None and args.grad_accum_steps < 1:
+        parser.error("--grad-accum-steps must be a positive integer")
 
     config_path = REPO_ROOT / "configs" / f"{args.config}.json"
     raw_config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -44,6 +53,9 @@ def main() -> None:
     )
     if args.resume and args.run_name:
         parser.error("--run-name cannot be used with --resume")
+    train_options = {**raw_config["train"]}
+    if args.grad_accum_steps is not None:
+        train_options["grad_accum_steps"] = args.grad_accum_steps
     train_config = TrainConfig(
         out_dir=str(
             args.resume.resolve().parent
@@ -51,7 +63,7 @@ def main() -> None:
             else REPO_ROOT / "runs" / (args.run_name or args.config)
         ),
         device=args.device,
-        **raw_config["train"],
+        **train_options,
     )
 
     torch.manual_seed(train_config.seed)
@@ -79,7 +91,7 @@ def main() -> None:
     summary = {
         "config_name": args.config,
         "model_config": model_config.to_dict(),
-        "train_config": raw_config["train"],
+        "train_config": train_options,
         "best_val_loss": result["best_val_loss"],
         "best_val_perplexity": math.exp(min(result["best_val_loss"], 20)),
         "num_params_non_embedding": model.num_params(),

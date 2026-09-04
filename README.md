@@ -60,6 +60,9 @@ python scripts/train.py --config tiny
 # Resume an interrupted run from its latest checkpoint
 python scripts/train.py --config tiny --resume runs/tiny/last.pt
 
+# Use four micro-batches per optimizer step when memory is constrained
+python scripts/train.py --config tiny --grad-accum-steps 4
+
 # 3. Generate text from a checkpoint
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --max-new-tokens 200
 
@@ -87,6 +90,11 @@ and appends to its existing `metrics.jsonl`; that log must end at the checkpoint
 step. Use the same config, device type, and `--use-fused-attn` setting. Older
 checkpoints without resume metadata fail clearly and remain usable for generation
 and evaluation.
+
+`--grad-accum-steps` averages that many independently sampled micro-batches before
+one clipped optimizer update. Learning-rate, evaluation, and checkpoint steps remain
+optimizer-step based, while throughput includes every accumulated token. Resume
+requires the same setting; checkpoints created before this option use the default of 1.
 
 `evaluate.py eval` scores every next-token target exactly once in deterministic,
 non-overlapping blocks, resetting context and position indices at each block.

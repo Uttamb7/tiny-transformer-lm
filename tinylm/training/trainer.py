@@ -19,6 +19,7 @@ class TrainConfig:
     max_steps: int = 2000
     warmup_steps: int = 100
     batch_size: int = 64
+    grad_accum_steps: int = 1
     max_lr: float = 3e-4
     min_lr_ratio: float = 0.1
     weight_decay: float = 0.1
@@ -28,6 +29,14 @@ class TrainConfig:
     log_interval: int = 20
     seed: int = 1337
     device: str = "cuda"
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.grad_accum_steps, int)
+            or isinstance(self.grad_accum_steps, bool)
+            or self.grad_accum_steps < 1
+        ):
+            raise ValueError("grad_accum_steps must be a positive integer")
 
 
 class Trainer:
@@ -72,7 +81,9 @@ class Trainer:
             raise ValueError("checkpoint cannot be resumed; missing " + ", ".join(missing))
         if checkpoint["model_config"] != self.model_config.to_dict():
             raise ValueError("checkpoint model configuration does not match the requested config")
-        if checkpoint["train_config"] != self._resume_config():
+        checkpoint_train_config = {**checkpoint["train_config"]}
+        checkpoint_train_config.setdefault("grad_accum_steps", 1)
+        if checkpoint_train_config != self._resume_config():
             raise ValueError(
                 "checkpoint training configuration does not match the requested config"
             )
@@ -176,7 +187,9 @@ class Trainer:
             if not records or records[-1].get("step") != self.resume_step:
                 raise ValueError("metrics.jsonl does not end at the checkpoint step")
         t0 = time.time()
-        tokens_per_step = cfg.batch_size * self.model_config.block_size
+        tokens_per_step = (
+            cfg.batch_size * self.model_config.block_size * cfg.grad_accum_steps
+        )
 
         self.model.train()
         for step in range(self.resume_step, cfg.max_steps + 1):
@@ -215,17 +228,16 @@ class Trainer:
             if step == cfg.max_steps:
                 break
 
-            x, y = self.train_data.get_batch(cfg.batch_size, cfg.device, self.generator)
-            _, loss = self.model(x, y)
-
-            if not torch.isfinite(loss):
-                raise RuntimeError(
-                    f"training diverged at step {step}: loss={loss.item()}. "
-                    "Try a lower max_lr or increase warmup_steps."
-                )
-
             self.optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+            for _ in range(cfg.grad_accum_steps):
+                x, y = self.train_data.get_batch(cfg.batch_size, cfg.device, self.generator)
+                _, loss = self.model(x, y)
+                if not torch.isfinite(loss):
+                    raise RuntimeError(
+                        f"training diverged at step {step}: loss={loss.item()}. "
+                        "Try a lower max_lr or increase warmup_steps."
+                    )
+                (loss / cfg.grad_accum_steps).backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), cfg.grad_clip)
             self.optimizer.step()
 
