@@ -37,6 +37,7 @@ class GPT(nn.Module):
     def __init__(self, config: GPTConfig, use_fused_attn: bool = False) -> None:
         super().__init__()
         self.config = config
+        self.use_fused_attn = use_fused_attn
 
         self.token_emb = nn.Embedding(config.vocab_size, config.n_embd)
         self.pos_emb = nn.Embedding(config.block_size, config.n_embd)

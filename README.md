@@ -57,6 +57,9 @@ python scripts/prepare_data.py --vocab-size 512
 # 2. Train a model (nano / tiny / small)
 python scripts/train.py --config tiny
 
+# Resume an interrupted run from its latest checkpoint
+python scripts/train.py --config tiny --resume runs/tiny/last.pt
+
 # 3. Generate text from a checkpoint
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --max-new-tokens 200
 
@@ -76,6 +79,14 @@ row stops at its first newly generated end token and is padded with that token
 until all rows finish or the budget runs out. End tokens already in the prompt
 do not stop a new completion. Existing TinyShakespeare training does not insert
 document-boundary tokens, so stopping does not teach those checkpoints when to end.
+
+Training checkpoints include the optimizer, completed step, best validation loss,
+CPU/trainer random states, device type, attention implementation, and
+schedule-critical training configuration. Resume uses the checkpoint's directory
+and appends to its existing `metrics.jsonl`; that log must end at the checkpoint
+step. Use the same config, device type, and `--use-fused-attn` setting. Older
+checkpoints without resume metadata fail clearly and remain usable for generation
+and evaluation.
 
 `evaluate.py eval` scores every next-token target exactly once in deterministic,
 non-overlapping blocks, resetting context and position indices at each block.

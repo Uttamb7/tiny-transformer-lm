@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import time
 from pathlib import Path
 
 import torch
@@ -26,6 +25,7 @@ def main() -> None:
         "--data-dir", type=Path, default=REPO_ROOT / "data_raw" / "tinyshakespeare"
     )
     parser.add_argument("--run-name", type=str, default=None)
+    parser.add_argument("--resume", type=Path, default=None, help="resume an interrupted run")
     default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser.add_argument("--device", type=str, default=default_device)
     parser.add_argument("--use-fused-attn", action="store_true")
@@ -37,8 +37,19 @@ def main() -> None:
     meta = json.loads((args.data_dir / "meta.json").read_text(encoding="utf-8"))
 
     model_config = GPTConfig.from_dict({**raw_config["model"], "vocab_size": meta["vocab_size"]})
+    resume_checkpoint = (
+        torch.load(args.resume, map_location=args.device, weights_only=False)
+        if args.resume
+        else None
+    )
+    if args.resume and args.run_name:
+        parser.error("--run-name cannot be used with --resume")
     train_config = TrainConfig(
-        out_dir=str(REPO_ROOT / "runs" / (args.run_name or args.config)),
+        out_dir=str(
+            args.resume.resolve().parent
+            if args.resume
+            else REPO_ROOT / "runs" / (args.run_name or args.config)
+        ),
         device=args.device,
         **raw_config["train"],
     )
@@ -51,11 +62,19 @@ def main() -> None:
     print(f"model params (non-embedding): {model.num_params():,}")
     print(f"device: {train_config.device}")
 
-    trainer = Trainer(model, model_config, train_config, train_data, val_data)
+    try:
+        trainer = Trainer(
+            model,
+            model_config,
+            train_config,
+            train_data,
+            val_data,
+            resume_checkpoint=resume_checkpoint,
+        )
+    except ValueError as error:
+        parser.error(str(error))
 
-    t0 = time.time()
     result = trainer.train()
-    elapsed = time.time() - t0
 
     summary = {
         "config_name": args.config,
@@ -64,7 +83,7 @@ def main() -> None:
         "best_val_loss": result["best_val_loss"],
         "best_val_perplexity": math.exp(min(result["best_val_loss"], 20)),
         "num_params_non_embedding": model.num_params(),
-        "total_train_seconds": elapsed,
+        "total_train_seconds": result["elapsed_seconds"],
         "device": train_config.device,
     }
     out_dir = Path(train_config.out_dir)
