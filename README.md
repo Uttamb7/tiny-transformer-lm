@@ -63,6 +63,9 @@ python scripts/train.py --config tiny --resume runs/tiny/last.pt
 # Use four micro-batches per optimizer step when memory is constrained
 python scripts/train.py --config tiny --grad-accum-steps 4
 
+# Stop after four validation checks without a new best loss
+python scripts/train.py --config tiny --early-stopping-patience 4
+
 # 3. Generate text from a checkpoint
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --max-new-tokens 200
 
@@ -95,6 +98,13 @@ and evaluation.
 one clipped optimizer update. Learning-rate, evaluation, and checkpoint steps remain
 optimizer-step based, while throughput includes every accumulated token. Resume
 requires the same setting; checkpoints created before this option use the default of 1.
+
+`--early-stopping-patience` stops after that many consecutive scheduled validation
+checks fail to improve validation loss. The stopping check is retained in
+`metrics.jsonl` and `last.pt`; `best.pt` remains the best validation checkpoint.
+The default is disabled. Resume requires the same patience and preserves its count;
+resuming an already stopped run performs no additional optimizer update. Older
+checkpoints use the disabled default.
 
 `evaluate.py eval` scores every next-token target exactly once in deterministic,
 non-overlapping blocks, resetting context and position indices at each block.

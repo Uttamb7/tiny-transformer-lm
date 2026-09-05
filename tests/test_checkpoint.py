@@ -185,6 +185,7 @@ def test_resume_rejects_incomplete_and_incompatible_checkpoints(tmp_path: Path) 
 
     legacy_default = {**checkpoint, "train_config": {**checkpoint["train_config"]}}
     del legacy_default["train_config"]["grad_accum_steps"]
+    del legacy_default["train_config"]["early_stopping_patience"]
     _make_trainer(tmp_path, config, "legacy-default", resume_checkpoint=legacy_default)
 
     with pytest.raises(ValueError, match="training configuration"):
@@ -194,4 +195,13 @@ def test_resume_rejects_incomplete_and_incompatible_checkpoints(tmp_path: Path) 
             "accum-mismatch",
             resume_checkpoint=checkpoint,
             grad_accum_steps=2,
+        )
+
+    with pytest.raises(ValueError, match="training configuration"):
+        _make_trainer(
+            tmp_path,
+            config,
+            "patience-mismatch",
+            resume_checkpoint=checkpoint,
+            early_stopping_patience=2,
         )

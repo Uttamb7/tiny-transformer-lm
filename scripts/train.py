@@ -35,10 +35,18 @@ def main() -> None:
         default=None,
         help="micro-batches to average per optimizer step",
     )
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=None,
+        help="stop after this many validation checks without improvement",
+    )
     args = parser.parse_args()
 
     if args.grad_accum_steps is not None and args.grad_accum_steps < 1:
         parser.error("--grad-accum-steps must be a positive integer")
+    if args.early_stopping_patience is not None and args.early_stopping_patience < 1:
+        parser.error("--early-stopping-patience must be a positive integer")
 
     config_path = REPO_ROOT / "configs" / f"{args.config}.json"
     raw_config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -56,6 +64,8 @@ def main() -> None:
     train_options = {**raw_config["train"]}
     if args.grad_accum_steps is not None:
         train_options["grad_accum_steps"] = args.grad_accum_steps
+    if args.early_stopping_patience is not None:
+        train_options["early_stopping_patience"] = args.early_stopping_patience
     train_config = TrainConfig(
         out_dir=str(
             args.resume.resolve().parent
@@ -96,6 +106,8 @@ def main() -> None:
         "best_val_perplexity": math.exp(min(result["best_val_loss"], 20)),
         "num_params_non_embedding": model.num_params(),
         "total_train_seconds": result["elapsed_seconds"],
+        "completed_step": result["completed_step"],
+        "stopped_early": result["stopped_early"],
         "device": train_config.device,
     }
     out_dir = Path(train_config.out_dir)

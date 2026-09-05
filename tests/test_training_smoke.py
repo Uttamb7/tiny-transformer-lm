@@ -208,7 +208,73 @@ def test_accumulated_gradients_match_one_effective_batch(tmp_path: Path) -> None
         assert torch.allclose(models[0].state_dict()[name], expected, atol=1e-7), name
 
 
+def test_early_stopping_saves_and_does_not_restart(tmp_path: Path) -> None:
+    vocab_size = 16
+    block_size = 4
+    train_path = tmp_path / "train.bin"
+    val_path = tmp_path / "val.bin"
+    make_synthetic_bin(train_path, vocab_size, 200, block_size)
+    make_synthetic_bin(val_path, vocab_size, 100, block_size)
+    config = GPTConfig(
+        vocab_size=vocab_size,
+        block_size=block_size,
+        n_layer=1,
+        n_head=1,
+        n_embd=8,
+        dropout=0.0,
+    )
+    options = dict(
+        out_dir=str(tmp_path / "early"),
+        max_steps=10,
+        warmup_steps=0,
+        batch_size=2,
+        eval_interval=2,
+        eval_iters=1,
+        early_stopping_patience=2,
+        device="cpu",
+    )
+    trainer = Trainer(
+        GPT(config),
+        config,
+        TrainConfig(**options),
+        TokenDataset(train_path, block_size),
+        TokenDataset(val_path, block_size),
+    )
+    losses = iter([1.0, 1.1, 1.2])
+    trainer.estimate_loss = lambda: {"train": 1.0, "val": next(losses)}
+
+    result = trainer.train()
+
+    assert result["stopped_early"] is True
+    assert result["completed_step"] == 4
+    assert [metric["step"] for metric in result["metrics"]] == [0, 2, 4]
+    last = torch.load(tmp_path / "early" / "last.pt", map_location="cpu", weights_only=False)
+    best = torch.load(tmp_path / "early" / "best.pt", map_location="cpu", weights_only=False)
+    assert (last["step"], last["no_improvement_evals"], last["stopped_early"]) == (4, 2, True)
+    assert best["step"] == 0
+
+    resumed = Trainer(
+        GPT(config),
+        config,
+        TrainConfig(**options),
+        TokenDataset(train_path, block_size),
+        TokenDataset(val_path, block_size),
+        resume_checkpoint=last,
+    )
+    resumed.optimizer.step = lambda: pytest.fail("stopped run performed an optimizer update")
+    resumed.estimate_loss = lambda: pytest.fail("stopped run performed another evaluation")
+    resumed_result = resumed.train()
+    assert resumed_result["completed_step"] == 4
+    assert resumed_result["stopped_early"] is True
+
+
 @pytest.mark.parametrize("value", [0, -1, 1.5, True])
 def test_gradient_accumulation_requires_a_positive_integer(value, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="positive integer"):
         TrainConfig(out_dir=str(tmp_path), grad_accum_steps=value)
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, True])
+def test_early_stopping_requires_a_positive_integer(value, tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        TrainConfig(out_dir=str(tmp_path), early_stopping_patience=value)

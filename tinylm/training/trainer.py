@@ -26,6 +26,7 @@ class TrainConfig:
     grad_clip: float = 1.0
     eval_interval: int = 200
     eval_iters: int = 50
+    early_stopping_patience: int | None = None
     log_interval: int = 20
     seed: int = 1337
     device: str = "cuda"
@@ -37,6 +38,12 @@ class TrainConfig:
             or self.grad_accum_steps < 1
         ):
             raise ValueError("grad_accum_steps must be a positive integer")
+        if self.early_stopping_patience is not None and (
+            not isinstance(self.early_stopping_patience, int)
+            or isinstance(self.early_stopping_patience, bool)
+            or self.early_stopping_patience < 1
+        ):
+            raise ValueError("early_stopping_patience must be a positive integer")
 
 
 class Trainer:
@@ -60,6 +67,8 @@ class Trainer:
         self.resume_step = 0
         self.best_val_loss = float("inf")
         self.elapsed_seconds = 0.0
+        self.no_improvement_evals = 0
+        self.stopped_early = False
         self.resumed = False
         if resume_checkpoint is not None:
             self.restore_checkpoint(resume_checkpoint)
@@ -83,6 +92,7 @@ class Trainer:
             raise ValueError("checkpoint model configuration does not match the requested config")
         checkpoint_train_config = {**checkpoint["train_config"]}
         checkpoint_train_config.setdefault("grad_accum_steps", 1)
+        checkpoint_train_config.setdefault("early_stopping_patience", None)
         if checkpoint_train_config != self._resume_config():
             raise ValueError(
                 "checkpoint training configuration does not match the requested config"
@@ -109,6 +119,8 @@ class Trainer:
         self.resume_step = step
         self.best_val_loss = float(checkpoint["best_val_loss"])
         self.elapsed_seconds = float(checkpoint["elapsed_seconds"])
+        self.no_improvement_evals = int(checkpoint.get("no_improvement_evals", 0))
+        self.stopped_early = bool(checkpoint.get("stopped_early", False))
         self.resumed = True
 
     def _build_optimizer(self) -> torch.optim.Optimizer:
@@ -159,6 +171,8 @@ class Trainer:
                 "val_loss": val_loss,
                 "best_val_loss": best_val_loss,
                 "elapsed_seconds": elapsed_seconds,
+                "no_improvement_evals": self.no_improvement_evals,
+                "stopped_early": self.stopped_early,
                 "torch_rng_state": torch.get_rng_state(),
                 "trainer_rng_state": self.generator.get_state(),
                 "device_type": torch.device(self.train_config.device).type,
@@ -186,13 +200,23 @@ class Trainer:
             ]
             if not records or records[-1].get("step") != self.resume_step:
                 raise ValueError("metrics.jsonl does not end at the checkpoint step")
+            if self.stopped_early:
+                return {
+                    "best_val_loss": best_val_loss,
+                    "metrics": self.metrics,
+                    "elapsed_seconds": self.elapsed_seconds,
+                    "completed_step": self.resume_step,
+                    "stopped_early": True,
+                }
         t0 = time.time()
         tokens_per_step = (
             cfg.batch_size * self.model_config.block_size * cfg.grad_accum_steps
         )
 
         self.model.train()
+        completed_step = self.resume_step
         for step in range(self.resume_step, cfg.max_steps + 1):
+            completed_step = step
             lr = get_lr(step, cfg.warmup_steps, cfg.max_steps, cfg.max_lr, cfg.min_lr_ratio)
             for group in self.optimizer.param_groups:
                 group["lr"] = lr
@@ -218,12 +242,21 @@ class Trainer:
 
                 if losses["val"] < best_val_loss:
                     best_val_loss = losses["val"]
+                    self.no_improvement_evals = 0
                     self.save_checkpoint(
                         out_dir / "best.pt", step, losses["val"], best_val_loss, elapsed
                     )
+                else:
+                    self.no_improvement_evals += 1
+                self.stopped_early = (
+                    cfg.early_stopping_patience is not None
+                    and self.no_improvement_evals >= cfg.early_stopping_patience
+                )
                 self.save_checkpoint(
                     out_dir / "last.pt", step, losses["val"], best_val_loss, elapsed
                 )
+                if self.stopped_early:
+                    break
 
             if step == cfg.max_steps:
                 break
@@ -247,4 +280,6 @@ class Trainer:
             "best_val_loss": best_val_loss,
             "metrics": self.metrics,
             "elapsed_seconds": self.elapsed_seconds,
+            "completed_step": completed_step,
+            "stopped_early": self.stopped_early,
         }
