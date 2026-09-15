@@ -114,6 +114,7 @@ class GPT(nn.Module):
         x = self.drop(self.token_emb(idx) + self.pos_emb(pos))
         next_cache = []
         for layer, block in enumerate(self.blocks):
+            assert isinstance(block, Block)
             x, layer_cache = block.forward_cached(x, cache[layer] if cache else None)
             next_cache.append(layer_cache)
         return self.lm_head(self.ln_f(x)[:, [-1], :]), next_cache
