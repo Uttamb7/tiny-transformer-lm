@@ -58,6 +58,20 @@ def test_manual_and_fused_attention_agree() -> None:
     assert torch.allclose(out_manual, out_fused, atol=1e-4)
 
 
+def test_cached_attention_matches_full_attention() -> None:
+    torch.manual_seed(0)
+    x = torch.randn(2, 6, 8)
+    for use_fused in (False, True):
+        attention = CausalSelfAttention(make_config(), use_fused=use_fused)
+        attention.eval()
+        with torch.no_grad():
+            full = attention(x)
+            _, cache = attention.forward_cached(x[:, :5])
+            last, cache = attention.forward_cached(x[:, 5:], cache)
+        assert torch.allclose(last, full[:, 5:], atol=1e-6)
+        assert cache[0].shape == cache[1].shape == (2, 2, 6, 4)
+
+
 def test_rejects_incompatible_head_count() -> None:
     import pytest
 

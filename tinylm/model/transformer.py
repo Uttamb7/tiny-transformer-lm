@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from tinylm.model.attention import CausalSelfAttention
+from tinylm.model.attention import CausalSelfAttention, KVCache
 from tinylm.model.config import GPTConfig
 
 
@@ -31,6 +31,14 @@ class Block(nn.Module):
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
         return x
+
+    def forward_cached(
+        self, x: torch.Tensor, cache: KVCache | None = None
+    ) -> tuple[torch.Tensor, KVCache]:
+        attended, cache = self.attn.forward_cached(self.ln_1(x), cache)
+        x = x + attended
+        x = x + self.mlp(self.ln_2(x))
+        return x, cache
 
 
 class GPT(nn.Module):
@@ -94,6 +102,22 @@ class GPT(nn.Module):
             logits = self.lm_head(x[:, [-1], :])
             return logits, None
 
+    def _forward_cached(
+        self, idx: torch.Tensor, cache: list[KVCache] | None = None
+    ) -> tuple[torch.Tensor, list[KVCache]]:
+        past_length = cache[0][0].size(2) if cache else 0
+        if past_length + idx.size(1) > self.config.block_size:
+            raise ValueError("cached sequence exceeds block_size")
+        pos = torch.arange(
+            past_length, past_length + idx.size(1), dtype=torch.long, device=idx.device
+        )
+        x = self.drop(self.token_emb(idx) + self.pos_emb(pos))
+        next_cache = []
+        for layer, block in enumerate(self.blocks):
+            x, layer_cache = block.forward_cached(x, cache[layer] if cache else None)
+            next_cache.append(layer_cache)
+        return self.lm_head(self.ln_f(x)[:, [-1], :]), next_cache
+
     @torch.no_grad()
     def generate(
         self,
@@ -103,6 +127,7 @@ class GPT(nn.Module):
         top_k: int | None = None,
         top_p: float | None = None,
         eos_token_id: int | None = None,
+        use_cache: bool = True,
     ) -> torch.Tensor:
         """Append tokens, optionally stopping each row at a newly generated EOS.
 
@@ -117,12 +142,16 @@ class GPT(nn.Module):
             raise ValueError("eos_token_id must be an integer within the model vocabulary")
         self.eval()
         finished = torch.zeros(idx.size(0), dtype=torch.bool, device=idx.device)
+        cache: list[KVCache] | None = None
         for _ in range(max_new_tokens):
-            if idx.size(1) <= self.config.block_size:
-                idx_cond = idx
+            if use_cache and cache is not None and cache[0][0].size(2) < self.config.block_size:
+                logits, cache = self._forward_cached(idx[:, -1:], cache)
             else:
                 idx_cond = idx[:, -self.config.block_size :]
-            logits, _ = self(idx_cond)
+                if use_cache:
+                    logits, cache = self._forward_cached(idx_cond)
+                else:
+                    logits, _ = self(idx_cond)
             logits = logits[:, -1, :] / max(temperature, 1e-5)
 
             if top_k is not None:

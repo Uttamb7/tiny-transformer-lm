@@ -12,7 +12,7 @@ Most of my other projects are full-stack/backend work (React, Next.js, FastAPI, 
 - Causal multi-head self-attention implemented manually (explicit QK^T / mask / softmax), with an optional fused `scaled_dot_product_attention` path for a measured speed comparison
 - Configurable model sizes (nano / tiny / small) via JSON configs
 - Training loop with AdamW, linear warmup + cosine LR decay, gradient clipping, NaN/divergence detection, and periodic checkpointing (best + last)
-- Text generation with temperature / top-k / top-p sampling and optional end-token stopping
+- Text generation with key/value-cached decoding, temperature / top-k / top-p sampling, and optional end-token stopping
 - Evaluation tooling: exact validation perplexity, cross-config comparison reports, manual-vs-fused attention benchmarks
 
 ## Technology stack
@@ -85,6 +85,10 @@ row stops at its first newly generated end token and is padded with that token
 until all rows finish or the budget runs out. End tokens already in the prompt
 do not stop a new completion. Existing TinyShakespeare training does not insert
 document-boundary tokens, so stopping does not teach those checkpoints when to end.
+Generation reuses each layer's attention keys and values while the active context
+fits within `block_size`. When the context window slides, it recomputes the cropped
+window so learned positional embeddings keep exactly the same behavior as uncached
+generation. Pass `use_cache=False` to `GPT.generate` for a reference recomputation.
 
 Training checkpoints include the optimizer, completed step, best validation loss,
 CPU/trainer random states, device type, attention implementation, and

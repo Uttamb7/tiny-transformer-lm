@@ -92,7 +92,7 @@ def test_generate_stops_at_first_new_eos(monkeypatch, eos_token_id) -> None:
     monkeypatch.setattr(model, "forward", forward)
     # An EOS already in the prompt must not stop a new completion.
     prompt = torch.tensor([[eos_token_id, 3, eos_token_id]])
-    out = model.generate(prompt, max_new_tokens=5, eos_token_id=eos_token_id)
+    out = model.generate(prompt, max_new_tokens=5, eos_token_id=eos_token_id, use_cache=False)
     assert out.tolist() == [[eos_token_id, 3, eos_token_id, eos_token_id]]
     assert len(calls) == 1
 
@@ -114,7 +114,10 @@ def test_generate_pads_finished_rows_and_respects_budget(monkeypatch, budget) ->
 
     monkeypatch.setattr(model, "forward", forward)
     prompt = torch.tensor([[1, 2], [2, 3]])
-    out = model.generate(prompt, max_new_tokens=budget, eos_token_id=0, top_k=1, top_p=0.9)
+    out = model.generate(
+        prompt, max_new_tokens=budget, eos_token_id=0, top_k=1, top_p=0.9,
+        use_cache=False,
+    )
     count = min(budget, 3)
     assert out.tolist() == [[1, 2] + [0] * count, [2, 3] + [4, 5, 0][:count]]
     assert len(calls) == count
@@ -130,7 +133,9 @@ def test_generate_uses_full_budget_without_eos(monkeypatch, eos_token_id) -> Non
         return logits, None
 
     monkeypatch.setattr(model, "forward", forward)
-    out = model.generate(torch.tensor([[1]]), max_new_tokens=4, eos_token_id=eos_token_id)
+    out = model.generate(
+        torch.tensor([[1]]), max_new_tokens=4, eos_token_id=eos_token_id, use_cache=False
+    )
     assert out.tolist() == [[1, 2, 2, 2, 2]]
 
 
@@ -143,4 +148,58 @@ def test_generate_rejects_invalid_eos_before_forward(monkeypatch, eos_token_id) 
 
     monkeypatch.setattr(model, "forward", forward)
     with pytest.raises(ValueError, match="eos_token_id"):
-        model.generate(torch.tensor([[1]]), max_new_tokens=1, eos_token_id=eos_token_id)
+        model.generate(
+            torch.tensor([[1]]), max_new_tokens=1, eos_token_id=eos_token_id,
+            use_cache=False,
+        )
+
+
+@pytest.mark.parametrize("use_fused_attn", [False, True])
+def test_cached_generation_matches_recomputation(use_fused_attn) -> None:
+    torch.manual_seed(0)
+    model = GPT(make_config(block_size=6), use_fused_attn=use_fused_attn)
+    prompt = torch.tensor([[1, 2, 3], [4, 5, 6]])
+
+    torch.manual_seed(42)
+    cached = model.generate(prompt, max_new_tokens=7, top_k=1)
+    torch.manual_seed(42)
+    uncached = model.generate(prompt, max_new_tokens=7, top_k=1, use_cache=False)
+
+    assert torch.equal(cached, uncached)
+
+
+def test_cached_generation_reuses_tokens_until_the_window_slides(monkeypatch) -> None:
+    model = GPT(make_config(block_size=5))
+    original = model._forward_cached
+    lengths = []
+
+    def counted(idx, cache=None):
+        lengths.append(idx.size(1))
+        return original(idx, cache)
+
+    monkeypatch.setattr(model, "_forward_cached", counted)
+    model.generate(torch.tensor([[1, 2, 3]]), max_new_tokens=4, top_k=1)
+
+    assert lengths == [3, 1, 1, 5]
+
+
+@pytest.mark.parametrize("use_fused_attn", [False, True])
+def test_cached_generation_matches_batched_eos_stopping(use_fused_attn) -> None:
+    torch.manual_seed(7)
+    model = GPT(make_config(), use_fused_attn=use_fused_attn)
+    prompt = torch.tensor([[1, 2, 3], [4, 5, 6]])
+    torch.manual_seed(11)
+    reference = model.generate(prompt, max_new_tokens=6, top_k=1, use_cache=False)
+    eos_token_id = reference[0, prompt.size(1)].item()
+
+    torch.manual_seed(11)
+    cached = model.generate(
+        prompt, max_new_tokens=6, top_k=1, eos_token_id=eos_token_id
+    )
+    torch.manual_seed(11)
+    uncached = model.generate(
+        prompt, max_new_tokens=6, top_k=1, eos_token_id=eos_token_id, use_cache=False
+    )
+
+    assert torch.equal(cached, uncached)
+    assert cached[0, prompt.size(1) :].eq(eos_token_id).all()
