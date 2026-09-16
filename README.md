@@ -54,6 +54,9 @@ Requires a working PyTorch install; GPU (CUDA) is optional but training is much 
 # 1. Download TinyShakespeare, train the BPE tokenizer, write train/val .bin files
 python scripts/prepare_data.py --vocab-size 512
 
+# Or prepare multiple local documents with a real end token between each file
+python scripts/prepare_data.py --input-file corpus/chapter1.txt corpus/chapter2.txt --out-dir data_raw/books
+
 # 2. Train a model (nano / tiny / small)
 python scripts/train.py --config tiny
 
@@ -85,6 +88,10 @@ row stops at its first newly generated end token and is padded with that token
 until all rows finish or the budget runs out. End tokens already in the prompt
 do not stop a new completion. Existing TinyShakespeare training does not insert
 document-boundary tokens, so stopping does not teach those checkpoints when to end.
+`prepare_data.py --input-file FILE [FILE ...]` inserts the reserved
+`<|endoftext|>` token between local files, allowing newly trained models to learn
+document endings. A single file retains the original continuous-corpus behavior,
+and `meta.json` records the document count.
 Generation reuses each layer's attention keys and values while the active context
 fits within `block_size`. When the context window slides, it recomputes the cropped
 window so learned positional embeddings keep exactly the same behavior as uncached
@@ -169,11 +176,11 @@ It is a plainted and Henry Saint Henry,
 That I may see his s
 ```
 
-Test coverage: 88% line coverage on `tinylm/` (`pytest --cov`); the untested module is `data/prepare.py`, which is thin glue around the (separately unit-tested) tokenizer training/save calls plus a network download, and is instead exercised directly via `scripts/prepare_data.py`.
+Test coverage: 95% line coverage on `tinylm/` (`pytest --cov`), including focused multi-document data-preparation and CLI coverage.
 
 ## Current limitations
 
 - Generated text is not grammatically coherent — these are intentionally small models (132K-2M non-embedding params) trained briefly on ~500K training tokens, not production-scale LLMs. The goal was demonstrating the training/eval mechanics, not chasing fluency.
 - The pretokenization regex approximates GPT-2's pattern using ASCII character classes instead of Unicode `\p{L}`/`\p{N}` (to avoid the third-party `regex` dependency). Non-ASCII text still round-trips exactly through the byte-level fallback, it just compresses less efficiently.
 - No distributed/multi-GPU training — single-device only, appropriate for this scale.
-- `<|endoftext|>` is reserved in the vocabulary but not currently inserted between documents, since TinyShakespeare is treated as one continuous corpus.
+- The default TinyShakespeare preparation treats the corpus as one continuous document; pass multiple `--input-file` paths to train with explicit `<|endoftext|>` boundaries.

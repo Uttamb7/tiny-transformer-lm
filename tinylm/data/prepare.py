@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -23,7 +24,7 @@ def download_tinyshakespeare(dest: Path) -> Path:
 
 
 def prepare_dataset(
-    raw_text_path: Path,
+    raw_text_path: Path | Sequence[Path],
     out_dir: Path,
     vocab_size: int = 512,
     val_fraction: float = 0.1,
@@ -32,14 +33,22 @@ def prepare_dataset(
         raise ValueError("val_fraction must be between 0 and 1")
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    text = raw_text_path.read_text(encoding="utf-8")
-    if len(text) < 1000:
-        raise ValueError(f"corpus at {raw_text_path} looks too small ({len(text)} chars)")
+    paths = [raw_text_path] if isinstance(raw_text_path, Path) else list(raw_text_path)
+    if not paths:
+        raise ValueError("at least one input file is required")
+    documents = [path.read_text(encoding="utf-8") for path in paths]
+    source_chars = sum(map(len, documents))
+    if source_chars < 1000:
+        raise ValueError(f"combined corpus looks too small ({source_chars} chars)")
 
-    tokenizer = ByteLevelBPETokenizer.train(text, vocab_size=vocab_size, verbose=True)
+    tokenizer = ByteLevelBPETokenizer.train(documents, vocab_size=vocab_size, verbose=True)
     tokenizer.save(out_dir / "tokenizer.json")
 
-    ids = tokenizer.encode(text)
+    ids = (
+        tokenizer.encode(documents[0])
+        if len(documents) == 1
+        else tokenizer.encode_documents(documents)
+    )
     ids_arr = np.array(ids, dtype=np.uint16)
 
     n = len(ids_arr)
@@ -53,8 +62,9 @@ def prepare_dataset(
         "vocab_size": tokenizer.vocab_size,
         "train_tokens": int(len(train_ids)),
         "val_tokens": int(len(val_ids)),
-        "source_chars": len(text),
-        "compression_ratio_chars_per_token": round(len(text) / n, 3),
+        "source_chars": source_chars,
+        "document_count": len(documents),
+        "compression_ratio_chars_per_token": round(source_chars / n, 3),
     }
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta

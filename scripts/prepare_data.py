@@ -17,8 +17,9 @@ def main() -> None:
     parser.add_argument(
         "--input-file",
         type=Path,
+        nargs="+",
         default=None,
-        help="Path to a local text corpus. If omitted, downloads TinyShakespeare.",
+        help="One or more local text documents. If omitted, downloads TinyShakespeare.",
     )
     parser.add_argument("--out-dir", type=Path, default=REPO_ROOT / "data_raw" / "tinyshakespeare")
     parser.add_argument("--vocab-size", type=int, default=512)

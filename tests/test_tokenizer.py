@@ -62,3 +62,13 @@ def test_save_and_load_round_trip(tmp_path, trained_tokenizer: ByteLevelBPEToken
 def test_train_rejects_vocab_size_below_256() -> None:
     with pytest.raises(ValueError):
         ByteLevelBPETokenizer.train("hello", vocab_size=100)
+
+
+def test_document_encoding_uses_reserved_separator_without_cross_boundary_merges() -> None:
+    tokenizer = ByteLevelBPETokenizer.train(["aaaa", "bbbb"], vocab_size=258)
+    ids = tokenizer.encode_documents(["aaaa", "bbbb"])
+    separator = tokenizer.special_tokens["<|endoftext|>"]
+    assert ids == tokenizer.encode("aaaa") + [separator] + tokenizer.encode("bbbb")
+    assert tokenizer.decode(ids) == "aaaa<|endoftext|>bbbb"
+    with pytest.raises(ValueError, match="at least one"):
+        tokenizer.encode_documents([])

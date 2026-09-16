@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from collections.abc import Iterable
 from pathlib import Path
 
 # Approximation of GPT-2's pretokenization regex using ASCII character classes
@@ -68,7 +69,7 @@ class ByteLevelBPETokenizer:
     @classmethod
     def train(
         cls,
-        text: str,
+        text: str | Iterable[str],
         vocab_size: int,
         special_tokens: tuple[str, ...] = ("<|endoftext|>",),
         pattern: str = PRETOKENIZE_PATTERN,
@@ -79,7 +80,10 @@ class ByteLevelBPETokenizer:
             raise ValueError(f"vocab_size must be >= {NUM_BASE_BYTES}, got {vocab_size}")
 
         compiled = re.compile(pattern)
-        chunk_freqs = Counter(compiled.findall(text))
+        documents = (text,) if isinstance(text, str) else text
+        chunk_freqs: Counter[str] = Counter()
+        for document in documents:
+            chunk_freqs.update(compiled.findall(document))
 
         word_to_ids: dict[str, list[int]] = {
             word: list(word.encode("utf-8")) for word in chunk_freqs
@@ -148,6 +152,24 @@ class ByteLevelBPETokenizer:
 
     def encode(self, text: str) -> list[int]:
         return self.encode_ordinary(text)
+
+    def encode_documents(
+        self,
+        documents: Iterable[str],
+        separator_token: str = "<|endoftext|>",
+    ) -> list[int]:
+        documents = list(documents)
+        if not documents:
+            raise ValueError("at least one document is required")
+        if separator_token not in self.special_tokens:
+            raise ValueError(f"unknown special token: {separator_token!r}")
+        separator_id = self.special_tokens[separator_token]
+        ids: list[int] = []
+        for index, document in enumerate(documents):
+            if index:
+                ids.append(separator_id)
+            ids.extend(self.encode_ordinary(document))
+        return ids
 
     def decode(self, ids: list[int]) -> str:
         parts: list[bytes] = []
