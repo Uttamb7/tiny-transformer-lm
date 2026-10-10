@@ -57,6 +57,37 @@ def test_generate_appends_requested_number_of_tokens() -> None:
     assert torch.equal(out[:, :5], idx)
 
 
+@pytest.mark.parametrize(
+    "prompt,kwargs,message",
+    [
+        (torch.empty(1, 0, dtype=torch.long), {}, "non-empty 2D"),
+        (torch.ones(2, dtype=torch.long), {}, "non-empty 2D"),
+        (torch.ones(1, 1, dtype=torch.long), {"max_new_tokens": -1}, "nonnegative"),
+        (torch.ones(1, 1, dtype=torch.long), {"max_new_tokens": True}, "nonnegative"),
+        (torch.ones(1, 1, dtype=torch.long), {"temperature": 0}, "finite and positive"),
+        (torch.ones(1, 1, dtype=torch.long), {"temperature": float("inf")}, "finite and positive"),
+        (torch.ones(1, 1, dtype=torch.long), {"top_k": 0}, "positive integer"),
+        (torch.ones(1, 1, dtype=torch.long), {"top_p": 0}, "in \\(0, 1]"),
+        (torch.ones(1, 1, dtype=torch.long), {"top_p": float("nan")}, "in \\(0, 1]"),
+    ],
+)
+def test_generate_rejects_invalid_settings_before_forward(
+    monkeypatch, prompt, kwargs, message
+) -> None:
+    model = GPT(make_config())
+    monkeypatch.setattr(model, "forward", lambda _: pytest.fail("invalid input reached model"))
+    max_new_tokens = kwargs.get("max_new_tokens", 1)
+    settings = {key: value for key, value in kwargs.items() if key != "max_new_tokens"}
+    with pytest.raises(ValueError, match=message):
+        model.generate(prompt, max_new_tokens=max_new_tokens, **settings)
+
+
+def test_generate_zero_token_budget_is_a_noop() -> None:
+    model = GPT(make_config())
+    prompt = torch.tensor([[1, 2]])
+    assert torch.equal(model.generate(prompt, max_new_tokens=0), prompt)
+
+
 def test_generate_is_deterministic_with_seed() -> None:
     config = make_config()
     model = GPT(config)

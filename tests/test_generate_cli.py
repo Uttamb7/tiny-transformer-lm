@@ -41,3 +41,6 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     unknown = run("--eos-token", "<missing>")
     assert unknown.returncode == 2
     assert "unknown special token" in unknown.stderr
+    invalid = run("--temperature", "0")
+    assert invalid.returncode == 2
+    assert "temperature must be finite and positive" in invalid.stderr

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -135,6 +137,32 @@ class GPT(nn.Module):
         Finished rows retain EOS and are padded with it until every row finishes
         or the token budget is exhausted. EOS tokens in the prompt are ignored.
         """
+        if idx.ndim != 2 or idx.size(0) < 1 or idx.size(1) < 1:
+            raise ValueError("idx must be a non-empty 2D prompt tensor")
+        if (
+            not isinstance(max_new_tokens, int)
+            or isinstance(max_new_tokens, bool)
+            or max_new_tokens < 0
+        ):
+            raise ValueError("max_new_tokens must be a nonnegative integer")
+        if (
+            not isinstance(temperature, (int, float))
+            or isinstance(temperature, bool)
+            or not math.isfinite(temperature)
+            or temperature <= 0
+        ):
+            raise ValueError("temperature must be finite and positive")
+        if top_k is not None and (
+            not isinstance(top_k, int) or isinstance(top_k, bool) or top_k < 1
+        ):
+            raise ValueError("top_k must be a positive integer")
+        if top_p is not None and (
+            not isinstance(top_p, (int, float))
+            or isinstance(top_p, bool)
+            or not math.isfinite(top_p)
+            or not 0 < top_p <= 1
+        ):
+            raise ValueError("top_p must be finite and in (0, 1]")
         if eos_token_id is not None and (
             not isinstance(eos_token_id, int)
             or isinstance(eos_token_id, bool)
@@ -153,7 +181,7 @@ class GPT(nn.Module):
                     logits, cache = self._forward_cached(idx_cond)
                 else:
                     logits, _ = self(idx_cond)
-            logits = logits[:, -1, :] / max(temperature, 1e-5)
+            logits = logits[:, -1, :] / temperature
 
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))

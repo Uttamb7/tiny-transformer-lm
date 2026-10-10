@@ -61,14 +61,17 @@ def main() -> None:
     prompt_ids = tokenizer.encode(args.prompt)
     idx = torch.tensor([prompt_ids], dtype=torch.long, device=args.device)
 
-    out_ids = model.generate(
-        idx,
-        max_new_tokens=args.max_new_tokens,
-        temperature=args.temperature,
-        top_k=args.top_k,
-        top_p=args.top_p,
-        eos_token_id=eos_token_id,
-    )
+    try:
+        out_ids = model.generate(
+            idx,
+            max_new_tokens=args.max_new_tokens,
+            temperature=args.temperature,
+            top_k=args.top_k,
+            top_p=args.top_p,
+            eos_token_id=eos_token_id,
+        )
+    except ValueError as error:
+        parser.error(str(error))
     print(tokenizer.decode(out_ids[0].tolist()))
 
 
