@@ -39,6 +39,10 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=50)
     parser.add_argument("--top-p", type=float, default=None)
     parser.add_argument(
+        "--repetition-penalty", type=float, default=1.0,
+        help="reduce logits for tokens already present in the sequence (must be >= 1)",
+    )
+    parser.add_argument(
         "--eos-token", type=str, default=None,
         help="stop after generating this tokenizer special token (e.g. <|endoftext|>)",
     )
@@ -69,6 +73,7 @@ def main() -> None:
             top_k=args.top_k,
             top_p=args.top_p,
             eos_token_id=eos_token_id,
+            repetition_penalty=args.repetition_penalty,
         )
     except ValueError as error:
         parser.error(str(error))

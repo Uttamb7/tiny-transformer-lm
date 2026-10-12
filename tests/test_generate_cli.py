@@ -44,3 +44,6 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     invalid = run("--temperature", "0")
     assert invalid.returncode == 2
     assert "temperature must be finite and positive" in invalid.stderr
+    invalid_penalty = run("--repetition-penalty", "0.5")
+    assert invalid_penalty.returncode == 2
+    assert "repetition_penalty must be finite and at least 1" in invalid_penalty.stderr

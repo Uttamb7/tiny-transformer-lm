@@ -69,6 +69,8 @@ def test_generate_appends_requested_number_of_tokens() -> None:
         (torch.ones(1, 1, dtype=torch.long), {"top_k": 0}, "positive integer"),
         (torch.ones(1, 1, dtype=torch.long), {"top_p": 0}, "in \\(0, 1]"),
         (torch.ones(1, 1, dtype=torch.long), {"top_p": float("nan")}, "in \\(0, 1]"),
+        (torch.ones(1, 1, dtype=torch.long), {"repetition_penalty": 0.9}, "at least 1"),
+        (torch.ones(1, 1, dtype=torch.long), {"repetition_penalty": float("inf")}, "at least 1"),
     ],
 )
 def test_generate_rejects_invalid_settings_before_forward(
@@ -86,6 +88,28 @@ def test_generate_zero_token_budget_is_a_noop() -> None:
     model = GPT(make_config())
     prompt = torch.tensor([[1, 2]])
     assert torch.equal(model.generate(prompt, max_new_tokens=0), prompt)
+
+
+@pytest.mark.parametrize("repeated_logit,new_logit", [(10.0, 9.0), (-1.0, -1.5)])
+def test_repetition_penalty_changes_each_rows_next_choice(
+    monkeypatch, repeated_logit, new_logit
+) -> None:
+    model = GPT(make_config())
+
+    def forward(idx):
+        logits = torch.full((2, 1, model.config.vocab_size), -100.0)
+        logits[0, 0, 1], logits[0, 0, 2] = repeated_logit, new_logit
+        logits[1, 0, 2], logits[1, 0, 1] = repeated_logit, new_logit
+        return logits, None
+
+    monkeypatch.setattr(model, "forward", forward)
+    prompt = torch.tensor([[1, 1], [2, 2]])
+    default = model.generate(prompt, max_new_tokens=1, top_k=1, use_cache=False)
+    penalized = model.generate(
+        prompt, max_new_tokens=1, top_k=1, repetition_penalty=2, use_cache=False
+    )
+    assert default[:, -1].tolist() == [1, 2]
+    assert penalized[:, -1].tolist() == [2, 1]
 
 
 def test_generate_is_deterministic_with_seed() -> None:
@@ -192,9 +216,11 @@ def test_cached_generation_matches_recomputation(use_fused_attn) -> None:
     prompt = torch.tensor([[1, 2, 3], [4, 5, 6]])
 
     torch.manual_seed(42)
-    cached = model.generate(prompt, max_new_tokens=7, top_k=1)
+    cached = model.generate(prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2)
     torch.manual_seed(42)
-    uncached = model.generate(prompt, max_new_tokens=7, top_k=1, use_cache=False)
+    uncached = model.generate(
+        prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2, use_cache=False
+    )
 
     assert torch.equal(cached, uncached)
 

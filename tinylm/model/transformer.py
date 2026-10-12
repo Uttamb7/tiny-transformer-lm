@@ -130,6 +130,7 @@ class GPT(nn.Module):
         top_k: int | None = None,
         top_p: float | None = None,
         eos_token_id: int | None = None,
+        repetition_penalty: float = 1.0,
         use_cache: bool = True,
     ) -> torch.Tensor:
         """Append tokens, optionally stopping each row at a newly generated EOS.
@@ -163,6 +164,13 @@ class GPT(nn.Module):
             or not 0 < top_p <= 1
         ):
             raise ValueError("top_p must be finite and in (0, 1]")
+        if (
+            not isinstance(repetition_penalty, (int, float))
+            or isinstance(repetition_penalty, bool)
+            or not math.isfinite(repetition_penalty)
+            or repetition_penalty < 1
+        ):
+            raise ValueError("repetition_penalty must be finite and at least 1")
         if eos_token_id is not None and (
             not isinstance(eos_token_id, int)
             or isinstance(eos_token_id, bool)
@@ -182,6 +190,15 @@ class GPT(nn.Module):
                 else:
                     logits, _ = self(idx_cond)
             logits = logits[:, -1, :] / temperature
+
+            if repetition_penalty != 1:
+                repeated = torch.gather(logits, 1, idx)
+                repeated = torch.where(
+                    repeated < 0,
+                    repeated * repetition_penalty,
+                    repeated / repetition_penalty,
+                )
+                logits.scatter_(1, idx, repeated)
 
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
