@@ -18,6 +18,13 @@ from tinylm.tokenizer import ByteLevelBPETokenizer
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
 def load_model(checkpoint_path: Path, device: str) -> tuple[GPT, dict]:
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     config = GPTConfig.from_dict(ckpt["model_config"])
@@ -35,6 +42,10 @@ def main() -> None:
     parser.add_argument("--tokenizer", type=Path, default=default_tokenizer)
     parser.add_argument("--prompt", type=str, default="\n")
     parser.add_argument("--max-new-tokens", type=int, default=200)
+    parser.add_argument(
+        "--num-samples", type=positive_int, default=1,
+        help="number of completions to generate in one batch",
+    )
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top-k", type=int, default=50)
     parser.add_argument("--top-p", type=float, default=None)
@@ -63,7 +74,9 @@ def main() -> None:
     print(f"loaded checkpoint from step {ckpt['step']} (val_loss={ckpt['val_loss']:.4f})")
 
     prompt_ids = tokenizer.encode(args.prompt)
-    idx = torch.tensor([prompt_ids], dtype=torch.long, device=args.device)
+    idx = torch.tensor([prompt_ids], dtype=torch.long, device=args.device).repeat(
+        args.num_samples, 1
+    )
 
     try:
         out_ids = model.generate(
@@ -77,7 +90,12 @@ def main() -> None:
         )
     except ValueError as error:
         parser.error(str(error))
-    print(tokenizer.decode(out_ids[0].tolist()))
+    if args.num_samples == 1:
+        print(tokenizer.decode(out_ids[0].tolist()))
+    else:
+        for sample, row in enumerate(out_ids, 1):
+            print(f"--- sample {sample} ---")
+            print(tokenizer.decode(row.tolist()))
 
 
 if __name__ == "__main__":

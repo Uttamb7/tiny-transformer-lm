@@ -38,6 +38,10 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     default = run()
     assert default.returncode == 0, default.stderr
     assert default.stdout.splitlines()[-1] == "Hi" + "<|endoftext|>" * 3
+    batched = run("--num-samples", "3")
+    assert batched.returncode == 0, batched.stderr
+    assert batched.stdout.count("--- sample ") == 3
+    assert batched.stdout.count("Hi" + "<|endoftext|>" * 3) == 3
     unknown = run("--eos-token", "<missing>")
     assert unknown.returncode == 2
     assert "unknown special token" in unknown.stderr
@@ -47,3 +51,9 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     invalid_penalty = run("--repetition-penalty", "0.5")
     assert invalid_penalty.returncode == 2
     assert "repetition_penalty must be finite and at least 1" in invalid_penalty.stderr
+    invalid_samples = subprocess.run(
+        [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
+         "--num-samples", "0"], capture_output=True, text=True, timeout=30,
+    )
+    assert invalid_samples.returncode == 2
+    assert "must be a positive integer" in invalid_samples.stderr
