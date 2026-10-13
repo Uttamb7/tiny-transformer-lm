@@ -22,6 +22,7 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
             parameter.zero_()
         model.ln_f.bias.fill_(1)
         model.token_emb.weight[eos].fill_(1)
+        model.token_emb.weight[ord("x")].fill_(0.5)
     checkpoint_path = tmp_path / "synthetic.pt"
     torch.save({"model_config": config.to_dict(), "model_state": model.state_dict(),
                 "step": 0, "val_loss": 0.0}, checkpoint_path)
@@ -38,6 +39,9 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     default = run()
     assert default.returncode == 0, default.stderr
     assert default.stdout.splitlines()[-1] == "Hi" + "<|endoftext|>" * 3
+    minimum = run("--eos-token", "<|endoftext|>", "--min-new-tokens", "2")
+    assert minimum.returncode == 0, minimum.stderr
+    assert minimum.stdout.splitlines()[-1] == "Hixx<|endoftext|>"
     batched = run("--num-samples", "3")
     assert batched.returncode == 0, batched.stderr
     assert batched.stdout.count("--- sample ") == 3
@@ -57,3 +61,12 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     )
     assert invalid_samples.returncode == 2
     assert "must be a positive integer" in invalid_samples.stderr
+    missing_eos = run("--min-new-tokens", "1")
+    assert missing_eos.returncode == 2
+    assert "requires --eos-token" in missing_eos.stderr
+    excessive_minimum = run(
+        "--eos-token", "<|endoftext|>", "--max-new-tokens", "1",
+        "--min-new-tokens", "2",
+    )
+    assert excessive_minimum.returncode == 2
+    assert "must not exceed" in excessive_minimum.stderr

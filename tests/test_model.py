@@ -152,6 +152,45 @@ def test_generate_stops_at_first_new_eos(monkeypatch, eos_token_id) -> None:
     assert len(calls) == 1
 
 
+def test_generate_delays_eos_until_minimum_new_tokens(monkeypatch) -> None:
+    model = GPT(make_config())
+
+    def forward(idx):
+        logits = torch.full((idx.size(0), 1, model.config.vocab_size), -100.0)
+        logits[:, :, 0] = 100.0
+        logits[:, :, 2] = 50.0
+        return logits, None
+
+    monkeypatch.setattr(model, "forward", forward)
+    out = model.generate(
+        torch.tensor([[1]]), max_new_tokens=5, eos_token_id=0,
+        min_new_tokens=2, top_k=1, use_cache=False,
+    )
+    assert out.tolist() == [[1, 2, 2, 0]]
+
+
+@pytest.mark.parametrize(
+    "options,message",
+    [
+        ({"min_new_tokens": -1, "eos_token_id": 0}, "nonnegative"),
+        ({"min_new_tokens": True, "eos_token_id": 0}, "nonnegative"),
+        ({"min_new_tokens": 2, "max_new_tokens": 1, "eos_token_id": 0}, "must not exceed"),
+        ({"min_new_tokens": 1}, "requires eos_token_id"),
+    ],
+)
+def test_generate_rejects_invalid_minimum_before_forward(monkeypatch, options, message) -> None:
+    model = GPT(make_config())
+
+    def forward(idx):
+        pytest.fail("invalid minimum reached the model")
+
+    monkeypatch.setattr(model, "forward", forward)
+    options = dict(options)
+    max_new_tokens = options.pop("max_new_tokens", 2)
+    with pytest.raises(ValueError, match=message):
+        model.generate(torch.tensor([[1]]), max_new_tokens=max_new_tokens, **options)
+
+
 @pytest.mark.parametrize("budget", [0, 2, 5])
 def test_generate_pads_finished_rows_and_respects_budget(monkeypatch, budget) -> None:
     model = GPT(make_config(block_size=2))
@@ -260,3 +299,27 @@ def test_cached_generation_matches_batched_eos_stopping(use_fused_attn) -> None:
 
     assert torch.equal(cached, uncached)
     assert cached[0, prompt.size(1) :].eq(eos_token_id).all()
+
+
+@pytest.mark.parametrize("use_fused_attn", [False, True])
+def test_minimum_generation_matches_cached_and_uncached(use_fused_attn) -> None:
+    torch.manual_seed(7)
+    model = GPT(make_config(), use_fused_attn=use_fused_attn)
+    prompt = torch.tensor([[1, 2, 3], [4, 5, 6]])
+    torch.manual_seed(11)
+    reference = model.generate(prompt, max_new_tokens=1, top_k=1, use_cache=False)
+    eos_token_id = reference[0, -1].item()
+
+    torch.manual_seed(11)
+    cached = model.generate(
+        prompt, max_new_tokens=4, top_k=1, eos_token_id=eos_token_id,
+        min_new_tokens=2,
+    )
+    torch.manual_seed(11)
+    uncached = model.generate(
+        prompt, max_new_tokens=4, top_k=1, eos_token_id=eos_token_id,
+        min_new_tokens=2, use_cache=False,
+    )
+
+    assert torch.equal(cached, uncached)
+    assert not cached[:, prompt.size(1) : prompt.size(1) + 2].eq(eos_token_id).any()

@@ -25,6 +25,13 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be a nonnegative integer")
+    return parsed
+
+
 def load_model(checkpoint_path: Path, device: str) -> tuple[GPT, dict]:
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     config = GPTConfig.from_dict(ckpt["model_config"])
@@ -57,6 +64,10 @@ def main() -> None:
         "--eos-token", type=str, default=None,
         help="stop after generating this tokenizer special token (e.g. <|endoftext|>)",
     )
+    parser.add_argument(
+        "--min-new-tokens", type=nonnegative_int, default=0,
+        help="minimum tokens to generate before --eos-token can stop a sample",
+    )
     parser.add_argument("--seed", type=int, default=None)
     default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser.add_argument("--device", type=str, default=default_device)
@@ -68,6 +79,10 @@ def main() -> None:
     tokenizer = ByteLevelBPETokenizer.load(args.tokenizer)
     if args.eos_token is not None and args.eos_token not in tokenizer.special_tokens:
         parser.error(f"unknown special token: {args.eos_token!r}")
+    if args.min_new_tokens > args.max_new_tokens:
+        parser.error("--min-new-tokens must not exceed --max-new-tokens")
+    if args.min_new_tokens and args.eos_token is None:
+        parser.error("--min-new-tokens requires --eos-token")
     eos_token_id = tokenizer.special_tokens.get(args.eos_token)
     model, ckpt = load_model(args.checkpoint, args.device)
 
@@ -86,6 +101,7 @@ def main() -> None:
             top_k=args.top_k,
             top_p=args.top_p,
             eos_token_id=eos_token_id,
+            min_new_tokens=args.min_new_tokens,
             repetition_penalty=args.repetition_penalty,
         )
     except ValueError as error:

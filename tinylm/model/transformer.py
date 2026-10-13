@@ -130,6 +130,7 @@ class GPT(nn.Module):
         top_k: int | None = None,
         top_p: float | None = None,
         eos_token_id: int | None = None,
+        min_new_tokens: int = 0,
         repetition_penalty: float = 1.0,
         use_cache: bool = True,
     ) -> torch.Tensor:
@@ -177,10 +178,20 @@ class GPT(nn.Module):
             or not 0 <= eos_token_id < self.config.vocab_size
         ):
             raise ValueError("eos_token_id must be an integer within the model vocabulary")
+        if (
+            not isinstance(min_new_tokens, int)
+            or isinstance(min_new_tokens, bool)
+            or min_new_tokens < 0
+        ):
+            raise ValueError("min_new_tokens must be a nonnegative integer")
+        if min_new_tokens > max_new_tokens:
+            raise ValueError("min_new_tokens must not exceed max_new_tokens")
+        if min_new_tokens and eos_token_id is None:
+            raise ValueError("min_new_tokens requires eos_token_id")
         self.eval()
         finished = torch.zeros(idx.size(0), dtype=torch.bool, device=idx.device)
         cache: list[KVCache] | None = None
-        for _ in range(max_new_tokens):
+        for generated in range(max_new_tokens):
             if use_cache and cache is not None and cache[0][0].size(2) < self.config.block_size:
                 logits, cache = self._forward_cached(idx[:, -1:], cache)
             else:
@@ -199,6 +210,9 @@ class GPT(nn.Module):
                     repeated / repetition_penalty,
                 )
                 logits.scatter_(1, idx, repeated)
+
+            if eos_token_id is not None and generated < min_new_tokens:
+                logits[:, eos_token_id] = float("-inf")
 
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))

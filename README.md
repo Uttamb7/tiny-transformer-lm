@@ -74,6 +74,8 @@ python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --ma
 
 # Optional: stop when a tokenizer special token is generated
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --eos-token "<|endoftext|>"
+# Require at least 20 continuation tokens before that end token can stop generation
+python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --eos-token "<|endoftext|>" --min-new-tokens 20
 
 # 4. Evaluate / compare
 python scripts/evaluate.py eval --checkpoint runs/tiny/best.pt
@@ -83,6 +85,8 @@ python scripts/evaluate.py benchmark-attn --device cuda
 
 Generation uses the full token budget by default. `--eos-token` must name a special
 token in the loaded tokenizer; the generated end token is retained in the output.
+`--min-new-tokens N` suppresses that end token until `N` continuation tokens have
+been generated; it requires `--eos-token` and cannot exceed the generation budget.
 The library equivalent is `GPT.generate(..., eos_token_id=token_id)`: each batch
 row stops at its first newly generated end token and is padded with that token
 until all rows finish or the budget runs out. End tokens already in the prompt
