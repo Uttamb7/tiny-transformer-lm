@@ -72,3 +72,29 @@ def test_document_encoding_uses_reserved_separator_without_cross_boundary_merges
     assert tokenizer.decode(ids) == "aaaa<|endoftext|>bbbb"
     with pytest.raises(ValueError, match="at least one"):
         tokenizer.encode_documents([])
+
+
+def test_encode_special_tokens_is_explicit_and_round_trips_mixed_text() -> None:
+    tokens = ("<special>", "<special>long")
+    tokenizer = ByteLevelBPETokenizer.train(
+        "ordinary text " * 20, vocab_size=256, special_tokens=tokens
+    )
+    text = "before<special>long<special>after"
+
+    ordinary = tokenizer.encode(text)
+    encoded = tokenizer.encode(text, allowed_special=tokens)
+
+    assert not set(ordinary) & set(tokenizer.special_tokens.values())
+    assert encoded == (
+        tokenizer.encode("before")
+        + [tokenizer.special_tokens["<special>long"], tokenizer.special_tokens["<special>"]]
+        + tokenizer.encode("after")
+    )
+    assert tokenizer.decode(ordinary) == text
+    assert tokenizer.decode(encoded) == text
+
+
+def test_encode_rejects_unknown_allowed_special_token() -> None:
+    tokenizer = ByteLevelBPETokenizer.train("ordinary text " * 20, vocab_size=256)
+    with pytest.raises(ValueError, match="unknown special token"):
+        tokenizer.encode("text", allowed_special={"<missing>"})

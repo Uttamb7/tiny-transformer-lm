@@ -150,8 +150,25 @@ class ByteLevelBPETokenizer:
             ids.extend(self._encode_chunk(chunk_bytes))
         return ids
 
-    def encode(self, text: str) -> list[int]:
-        return self.encode_ordinary(text)
+    def encode(self, text: str, *, allowed_special: Iterable[str] = ()) -> list[int]:
+        allowed = set(allowed_special)
+        unknown = allowed - self.special_tokens.keys()
+        if unknown:
+            raise ValueError(f"unknown special token: {min(unknown)!r}")
+        if not allowed:
+            return self.encode_ordinary(text)
+
+        pattern = re.compile(
+            "|".join(re.escape(token) for token in sorted(allowed, key=len, reverse=True))
+        )
+        ids: list[int] = []
+        start = 0
+        for match in pattern.finditer(text):
+            ids.extend(self.encode_ordinary(text[start : match.start()]))
+            ids.append(self.special_tokens[match.group()])
+            start = match.end()
+        ids.extend(self.encode_ordinary(text[start:]))
+        return ids
 
     def encode_documents(
         self,
