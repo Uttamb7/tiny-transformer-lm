@@ -72,6 +72,9 @@ python scripts/train.py --config tiny --early-stopping-patience 4
 # 3. Generate text from a checkpoint
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --max-new-tokens 200
 
+# Prevent exact three-token phrases from repeating within a completion
+python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --no-repeat-ngram-size 3
+
 # Optional: stop when a tokenizer special token is generated
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --eos-token "<|endoftext|>"
 # Require at least 20 continuation tokens before that end token can stop generation
@@ -85,6 +88,8 @@ python scripts/evaluate.py benchmark-attn --device cuda
 
 Generation uses the full token budget by default. `--eos-token` must name a special
 token in the loaded tokenizer; the generated end token is retained in the output.
+`--no-repeat-ngram-size N` prevents each sample from recreating an exact `N`-token
+phrase already present in its prompt or generated continuation.
 `--min-new-tokens N` suppresses that end token until `N` continuation tokens have
 been generated; it requires `--eos-token` and cannot exceed the generation budget.
 The library equivalent is `GPT.generate(..., eos_token_id=token_id)`: each batch

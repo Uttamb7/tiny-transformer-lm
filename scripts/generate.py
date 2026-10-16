@@ -61,6 +61,10 @@ def main() -> None:
         help="reduce logits for tokens already present in the sequence (must be >= 1)",
     )
     parser.add_argument(
+        "--no-repeat-ngram-size", type=positive_int, default=None,
+        help="prevent generation from repeating an n-gram of this size",
+    )
+    parser.add_argument(
         "--eos-token", type=str, default=None,
         help="stop after generating this tokenizer special token (e.g. <|endoftext|>)",
     )
@@ -103,6 +107,7 @@ def main() -> None:
             eos_token_id=eos_token_id,
             min_new_tokens=args.min_new_tokens,
             repetition_penalty=args.repetition_penalty,
+            no_repeat_ngram_size=args.no_repeat_ngram_size,
         )
     except ValueError as error:
         parser.error(str(error))

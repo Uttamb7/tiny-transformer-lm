@@ -33,7 +33,7 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     def run(*extra):
         return subprocess.run(command + list(extra), capture_output=True, text=True, timeout=30)
 
-    stopped = run("--eos-token", "<|endoftext|>")
+    stopped = run("--eos-token", "<|endoftext|>", "--no-repeat-ngram-size", "2")
     assert stopped.returncode == 0, stopped.stderr
     assert stopped.stdout.splitlines()[-1] == "Hi<|endoftext|>"
     default = run()
@@ -61,6 +61,12 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     )
     assert invalid_samples.returncode == 2
     assert "must be a positive integer" in invalid_samples.stderr
+    invalid_ngram = subprocess.run(
+        [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
+         "--no-repeat-ngram-size", "0"], capture_output=True, text=True, timeout=30,
+    )
+    assert invalid_ngram.returncode == 2
+    assert "must be a positive integer" in invalid_ngram.stderr
     missing_eos = run("--min-new-tokens", "1")
     assert missing_eos.returncode == 2
     assert "requires --eos-token" in missing_eos.stderr

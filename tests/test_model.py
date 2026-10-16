@@ -71,6 +71,8 @@ def test_generate_appends_requested_number_of_tokens() -> None:
         (torch.ones(1, 1, dtype=torch.long), {"top_p": float("nan")}, "in \\(0, 1]"),
         (torch.ones(1, 1, dtype=torch.long), {"repetition_penalty": 0.9}, "at least 1"),
         (torch.ones(1, 1, dtype=torch.long), {"repetition_penalty": float("inf")}, "at least 1"),
+        (torch.ones(1, 1, dtype=torch.long), {"no_repeat_ngram_size": 0}, "positive integer"),
+        (torch.ones(1, 1, dtype=torch.long), {"no_repeat_ngram_size": True}, "positive integer"),
     ],
 )
 def test_generate_rejects_invalid_settings_before_forward(
@@ -123,6 +125,39 @@ def test_generate_is_deterministic_with_seed() -> None:
     out2 = model.generate(idx.clone(), max_new_tokens=5, top_k=5)
 
     assert torch.equal(out1, out2)
+
+
+def test_no_repeat_ngram_blocks_each_rows_repeated_phrase(monkeypatch) -> None:
+    model = GPT(make_config())
+
+    def forward(idx):
+        logits = torch.full((2, 1, model.config.vocab_size), -100.0)
+        logits[0, 0, 2], logits[0, 0, 3] = 10.0, 9.0
+        logits[1, 0, 1], logits[1, 0, 3] = 10.0, 9.0
+        return logits, None
+
+    monkeypatch.setattr(model, "forward", forward)
+    prompt = torch.tensor([[1, 2, 1], [2, 1, 2]])
+    default = model.generate(prompt, max_new_tokens=1, top_k=1, use_cache=False)
+    constrained = model.generate(
+        prompt, max_new_tokens=1, top_k=1, no_repeat_ngram_size=2, use_cache=False
+    )
+    assert default[:, -1].tolist() == [2, 1]
+    assert constrained[:, -1].tolist() == [3, 3]
+
+
+def test_no_repeat_ngram_reports_exhausted_vocabulary(monkeypatch) -> None:
+    model = GPT(make_config(block_size=64))
+    monkeypatch.setattr(
+        model,
+        "forward",
+        lambda idx: (torch.zeros(1, 1, model.config.vocab_size), None),
+    )
+    prompt = torch.arange(model.config.vocab_size).unsqueeze(0)
+    with pytest.raises(ValueError, match="banned every token"):
+        model.generate(
+            prompt, max_new_tokens=1, no_repeat_ngram_size=1, use_cache=False
+        )
 
 
 def test_num_params_excludes_positional_embedding_by_default() -> None:
@@ -255,10 +290,14 @@ def test_cached_generation_matches_recomputation(use_fused_attn) -> None:
     prompt = torch.tensor([[1, 2, 3], [4, 5, 6]])
 
     torch.manual_seed(42)
-    cached = model.generate(prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2)
+    cached = model.generate(
+        prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2,
+        no_repeat_ngram_size=2,
+    )
     torch.manual_seed(42)
     uncached = model.generate(
-        prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2, use_cache=False
+        prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2,
+        no_repeat_ngram_size=2, use_cache=False,
     )
 
     assert torch.equal(cached, uncached)
@@ -290,11 +329,13 @@ def test_cached_generation_matches_batched_eos_stopping(use_fused_attn) -> None:
 
     torch.manual_seed(11)
     cached = model.generate(
-        prompt, max_new_tokens=6, top_k=1, eos_token_id=eos_token_id
+        prompt, max_new_tokens=6, top_k=1, eos_token_id=eos_token_id,
+        no_repeat_ngram_size=2,
     )
     torch.manual_seed(11)
     uncached = model.generate(
-        prompt, max_new_tokens=6, top_k=1, eos_token_id=eos_token_id, use_cache=False
+        prompt, max_new_tokens=6, top_k=1, eos_token_id=eos_token_id,
+        no_repeat_ngram_size=2, use_cache=False,
     )
 
     assert torch.equal(cached, uncached)

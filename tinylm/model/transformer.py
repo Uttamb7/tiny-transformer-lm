@@ -132,6 +132,7 @@ class GPT(nn.Module):
         eos_token_id: int | None = None,
         min_new_tokens: int = 0,
         repetition_penalty: float = 1.0,
+        no_repeat_ngram_size: int | None = None,
         use_cache: bool = True,
     ) -> torch.Tensor:
         """Append tokens, optionally stopping each row at a newly generated EOS.
@@ -172,6 +173,12 @@ class GPT(nn.Module):
             or repetition_penalty < 1
         ):
             raise ValueError("repetition_penalty must be finite and at least 1")
+        if no_repeat_ngram_size is not None and (
+            not isinstance(no_repeat_ngram_size, int)
+            or isinstance(no_repeat_ngram_size, bool)
+            or no_repeat_ngram_size < 1
+        ):
+            raise ValueError("no_repeat_ngram_size must be a positive integer")
         if eos_token_id is not None and (
             not isinstance(eos_token_id, int)
             or isinstance(eos_token_id, bool)
@@ -211,8 +218,26 @@ class GPT(nn.Module):
                 )
                 logits.scatter_(1, idx, repeated)
 
+            if no_repeat_ngram_size is not None:
+                size = no_repeat_ngram_size
+                for row in range(idx.size(0)):
+                    if finished[row].item() or idx.size(1) + 1 < size:
+                        continue
+                    tokens = idx[row].tolist()
+                    prefix = tokens[-(size - 1) :] if size > 1 else []
+                    banned = {
+                        tokens[start + size - 1]
+                        for start in range(len(tokens) - size + 1)
+                        if tokens[start : start + size - 1] == prefix
+                    }
+                    logits[row, list(banned)] = float("-inf")
+
             if eos_token_id is not None and generated < min_new_tokens:
                 logits[:, eos_token_id] = float("-inf")
+
+            exhausted = ~torch.isfinite(logits).any(dim=1) & ~finished
+            if exhausted.any():
+                raise ValueError("generation constraints banned every token")
 
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
