@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -161,28 +162,31 @@ class Trainer:
         elapsed_seconds: float = 0.0,
     ) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(
-            {
-                "model_state": self.model.state_dict(),
-                "optimizer_state": self.optimizer.state_dict(),
-                "model_config": self.model_config.to_dict(),
-                "train_config": self._resume_config(),
-                "step": step,
-                "val_loss": val_loss,
-                "best_val_loss": best_val_loss,
-                "elapsed_seconds": elapsed_seconds,
-                "no_improvement_evals": self.no_improvement_evals,
-                "stopped_early": self.stopped_early,
-                "torch_rng_state": torch.get_rng_state(),
-                "trainer_rng_state": self.generator.get_state(),
-                "device_type": torch.device(self.train_config.device).type,
-                "use_fused_attn": self.model.use_fused_attn,
-                "cuda_rng_state": torch.cuda.get_rng_state_all()
-                if torch.device(self.train_config.device).type == "cuda"
-                else None,
-            },
-            path,
-        )
+        checkpoint = {
+            "model_state": self.model.state_dict(),
+            "optimizer_state": self.optimizer.state_dict(),
+            "model_config": self.model_config.to_dict(),
+            "train_config": self._resume_config(),
+            "step": step,
+            "val_loss": val_loss,
+            "best_val_loss": best_val_loss,
+            "elapsed_seconds": elapsed_seconds,
+            "no_improvement_evals": self.no_improvement_evals,
+            "stopped_early": self.stopped_early,
+            "torch_rng_state": torch.get_rng_state(),
+            "trainer_rng_state": self.generator.get_state(),
+            "device_type": torch.device(self.train_config.device).type,
+            "use_fused_attn": self.model.use_fused_attn,
+            "cuda_rng_state": torch.cuda.get_rng_state_all()
+            if torch.device(self.train_config.device).type == "cuda"
+            else None,
+        }
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            torch.save(checkpoint, temporary)
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def train(self) -> dict:
         cfg = self.train_config

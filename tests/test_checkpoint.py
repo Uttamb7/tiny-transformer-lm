@@ -71,6 +71,26 @@ def test_checkpoint_round_trip_preserves_weights_and_outputs(tmp_path: Path) -> 
         logits_a, _ = trainer.model(x)
         logits_b, _ = restored_model(x)
     assert torch.equal(logits_a, logits_b)
+    assert list(tmp_path.glob(".ckpt.pt.*.tmp")) == []
+
+
+def test_failed_checkpoint_save_preserves_previous_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trainer = _make_trainer(tmp_path, make_config())
+    path = tmp_path / "last.pt"
+    path.write_bytes(b"previous checkpoint")
+
+    def fail_save(value, destination):
+        Path(destination).write_bytes(b"partial checkpoint")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(torch, "save", fail_save)
+    with pytest.raises(OSError, match="disk full"):
+        trainer.save_checkpoint(path, step=1, val_loss=2.0, best_val_loss=2.0)
+
+    assert path.read_bytes() == b"previous checkpoint"
+    assert list(tmp_path.glob(".last.pt.*.tmp")) == []
 
 
 def test_loading_checkpoint_with_wrong_architecture_raises(tmp_path: Path) -> None:
