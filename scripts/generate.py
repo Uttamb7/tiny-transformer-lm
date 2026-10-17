@@ -48,6 +48,10 @@ def main() -> None:
     default_tokenizer = REPO_ROOT / "data_raw" / "tinyshakespeare" / "tokenizer.json"
     parser.add_argument("--tokenizer", type=Path, default=default_tokenizer)
     parser.add_argument("--prompt", type=str, default="\n")
+    parser.add_argument(
+        "--allowed-special", action="append", default=[], metavar="TOKEN",
+        help="reserved tokenizer token to recognize in the prompt (repeatable)",
+    )
     parser.add_argument("--max-new-tokens", type=int, default=200)
     parser.add_argument(
         "--num-samples", type=positive_int, default=1,
@@ -88,11 +92,14 @@ def main() -> None:
     if args.min_new_tokens and args.eos_token is None:
         parser.error("--min-new-tokens requires --eos-token")
     eos_token_id = tokenizer.special_tokens.get(args.eos_token)
+    try:
+        prompt_ids = tokenizer.encode(args.prompt, allowed_special=args.allowed_special)
+    except ValueError as error:
+        parser.error(str(error))
     model, ckpt = load_model(args.checkpoint, args.device)
 
     print(f"loaded checkpoint from step {ckpt['step']} (val_loss={ckpt['val_loss']:.4f})")
 
-    prompt_ids = tokenizer.encode(args.prompt)
     idx = torch.tensor([prompt_ids], dtype=torch.long, device=args.device).repeat(
         args.num_samples, 1
     )

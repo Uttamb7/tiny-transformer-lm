@@ -39,6 +39,18 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     default = run()
     assert default.returncode == 0, default.stderr
     assert default.stdout.splitlines()[-1] == "Hi" + "<|endoftext|>" * 3
+    special_prompt = run(
+        "--prompt", "<|endoftext|>", "--allowed-special", "<|endoftext|>",
+        "--no-repeat-ngram-size", "1", "--max-new-tokens", "1",
+    )
+    assert special_prompt.returncode == 0, special_prompt.stderr
+    assert special_prompt.stdout.splitlines()[-1] == "<|endoftext|>x"
+    ordinary_prompt = run(
+        "--prompt", "<|endoftext|>", "--no-repeat-ngram-size", "1",
+        "--max-new-tokens", "1",
+    )
+    assert ordinary_prompt.returncode == 0, ordinary_prompt.stderr
+    assert ordinary_prompt.stdout.splitlines()[-1] == "<|endoftext|><|endoftext|>"
     minimum = run("--eos-token", "<|endoftext|>", "--min-new-tokens", "2")
     assert minimum.returncode == 0, minimum.stderr
     assert minimum.stdout.splitlines()[-1] == "Hixx<|endoftext|>"
@@ -67,6 +79,13 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     )
     assert invalid_ngram.returncode == 2
     assert "must be a positive integer" in invalid_ngram.stderr
+    unknown_prompt_token = subprocess.run(
+        [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
+         "--tokenizer", str(tokenizer_path), "--allowed-special", "<missing>"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert unknown_prompt_token.returncode == 2
+    assert "unknown special token" in unknown_prompt_token.stderr
     missing_eos = run("--min-new-tokens", "1")
     assert missing_eos.returncode == 2
     assert "requires --eos-token" in missing_eos.stderr
