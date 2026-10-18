@@ -95,6 +95,38 @@ def test_diverging_loss_raises_clear_error(tmp_path: Path) -> None:
         trainer.train()
 
 
+def test_loss_estimation_is_repeatable_without_advancing_training_samples(
+    tmp_path: Path,
+) -> None:
+    for name, seed in (("train.bin", 0), ("val.bin", 1)):
+        make_synthetic_bin(tmp_path / name, 16, 200, 4, seed)
+    config = GPTConfig(
+        vocab_size=16, block_size=4, n_layer=1, n_head=1, n_embd=8, dropout=0.0
+    )
+    datasets = [TokenDataset(tmp_path / name, 4) for name in ("train.bin", "val.bin")]
+    seen_seeds: list[list[int]] = [[], []]
+    for index, dataset in enumerate(datasets):
+        get_batch = dataset.get_batch
+
+        def recorded_batch(*args, _index=index, _get_batch=get_batch):
+            seen_seeds[_index].append(args[2].initial_seed())
+            return _get_batch(*args)
+
+        dataset.get_batch = recorded_batch
+
+    trainer = Trainer(
+        GPT(config), config,
+        TrainConfig(out_dir=str(tmp_path / "run"), batch_size=2, eval_iters=2,
+                    seed=7, device="cpu"),
+        datasets[0], datasets[1],
+    )
+    training_state = trainer.generator.get_state().clone()
+
+    assert trainer.estimate_loss() == trainer.estimate_loss()
+    assert torch.equal(trainer.generator.get_state(), training_state)
+    assert seen_seeds == [[7, 7, 7, 7], [8, 8, 8, 8]]
+
+
 def test_gradient_accumulation_uses_micro_batches_and_one_update_per_step(
     tmp_path: Path,
 ) -> None:

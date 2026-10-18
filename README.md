@@ -119,6 +119,10 @@ step. Use the same config, device type, and `--use-fused-attn` setting. Older
 checkpoints without resume metadata fail clearly and remain usable for generation
 and evaluation.
 
+Periodic train and validation metrics use fixed split-specific sampled windows
+derived from the training seed. Evaluation therefore remains comparable between
+steps and does not change the optimizer's later training batches.
+
 `--grad-accum-steps` averages that many independently sampled micro-batches before
 one clipped optimizer update. Learning-rate, evaluation, and checkpoint steps remain
 optimizer-step based, while throughput includes every accumulated token. Resume

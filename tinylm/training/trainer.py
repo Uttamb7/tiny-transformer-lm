@@ -141,11 +141,14 @@ class Trainer:
     def estimate_loss(self) -> dict[str, float]:
         self.model.eval()
         out: dict[str, float] = {}
-        for split, dataset in (("train", self.train_data), ("val", self.val_data)):
+        for split_index, (split, dataset) in enumerate(
+            (("train", self.train_data), ("val", self.val_data))
+        ):
+            generator = torch.Generator().manual_seed(self.train_config.seed + split_index)
             losses = torch.zeros(self.train_config.eval_iters)
             for i in range(self.train_config.eval_iters):
                 x, y = dataset.get_batch(
-                    self.train_config.batch_size, self.train_config.device, self.generator
+                    self.train_config.batch_size, self.train_config.device, generator
                 )
                 _, loss = self.model(x, y)
                 losses[i] = loss.item()
