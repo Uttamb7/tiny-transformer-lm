@@ -1,12 +1,16 @@
 import subprocess
 import sys
 from pathlib import Path
+from runpy import run_path
 
 import torch
 
-from scripts import generate as generate_cli
 from tinylm.model import GPT, GPTConfig
 from tinylm.tokenizer import ByteLevelBPETokenizer
+
+generate_cli = run_path(
+    str(Path(__file__).resolve().parents[1] / "scripts" / "generate.py")
+)
 
 
 def test_generate_cli_uses_dedicated_sampling_generator(tmp_path, monkeypatch) -> None:
@@ -26,13 +30,13 @@ def test_generate_cli_uses_dedicated_sampling_generator(tmp_path, monkeypatch) -
         torch.rand(10)  # Model loading must not consume the sampling stream.
         return Model(), {"step": 0, "val_loss": 0.0}
 
-    monkeypatch.setattr(generate_cli, "load_model", load_model)
+    monkeypatch.setitem(generate_cli["main"].__globals__, "load_model", load_model)
     monkeypatch.setattr(
         sys, "argv",
         ["generate.py", "--checkpoint", str(tmp_path / "unused.pt"),
          "--tokenizer", str(tokenizer_path), "--device", "cpu", "--seed", "42"],
     )
-    generate_cli.main()
+    generate_cli["main"]()
 
     assert captured["seed"] == 42
     assert captured["draw"] == torch.rand((), generator=torch.Generator().manual_seed(42)).item()
