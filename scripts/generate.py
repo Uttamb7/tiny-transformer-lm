@@ -81,9 +81,6 @@ def main() -> None:
     parser.add_argument("--device", type=str, default=default_device)
     args = parser.parse_args()
 
-    if args.seed is not None:
-        torch.manual_seed(args.seed)
-
     tokenizer = ByteLevelBPETokenizer.load(args.tokenizer)
     if args.eos_token is not None and args.eos_token not in tokenizer.special_tokens:
         parser.error(f"unknown special token: {args.eos_token!r}")
@@ -97,6 +94,11 @@ def main() -> None:
     except ValueError as error:
         parser.error(str(error))
     model, ckpt = load_model(args.checkpoint, args.device)
+    generator = (
+        torch.Generator(device=torch.device(args.device)).manual_seed(args.seed)
+        if args.seed is not None
+        else None
+    )
 
     print(f"loaded checkpoint from step {ckpt['step']} (val_loss={ckpt['val_loss']:.4f})")
 
@@ -115,6 +117,7 @@ def main() -> None:
             min_new_tokens=args.min_new_tokens,
             repetition_penalty=args.repetition_penalty,
             no_repeat_ngram_size=args.no_repeat_ngram_size,
+            generator=generator,
         )
     except ValueError as error:
         parser.error(str(error))

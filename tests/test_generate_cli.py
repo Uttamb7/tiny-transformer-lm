@@ -4,8 +4,38 @@ from pathlib import Path
 
 import torch
 
+from scripts import generate as generate_cli
 from tinylm.model import GPT, GPTConfig
 from tinylm.tokenizer import ByteLevelBPETokenizer
+
+
+def test_generate_cli_uses_dedicated_sampling_generator(tmp_path, monkeypatch) -> None:
+    tokenizer = ByteLevelBPETokenizer.train("", vocab_size=256)
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer.save(tokenizer_path)
+    captured = {}
+
+    class Model:
+        def generate(self, idx, **options):
+            generator = options["generator"]
+            captured["seed"] = generator.initial_seed()
+            captured["draw"] = torch.rand((), generator=generator).item()
+            return idx
+
+    def load_model(checkpoint_path, device):
+        torch.rand(10)  # Model loading must not consume the sampling stream.
+        return Model(), {"step": 0, "val_loss": 0.0}
+
+    monkeypatch.setattr(generate_cli, "load_model", load_model)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["generate.py", "--checkpoint", str(tmp_path / "unused.pt"),
+         "--tokenizer", str(tokenizer_path), "--device", "cpu", "--seed", "42"],
+    )
+    generate_cli.main()
+
+    assert captured["seed"] == 42
+    assert captured["draw"] == torch.rand((), generator=torch.Generator().manual_seed(42)).item()
 
 
 def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:

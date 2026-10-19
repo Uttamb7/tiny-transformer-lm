@@ -127,6 +127,31 @@ def test_generate_is_deterministic_with_seed() -> None:
     assert torch.equal(out1, out2)
 
 
+def test_generate_can_isolate_its_random_stream() -> None:
+    torch.manual_seed(0)
+    model = GPT(make_config())
+    prompt = torch.tensor([[1, 2, 3]])
+    global_state = torch.get_rng_state().clone()
+
+    first = model.generate(
+        prompt, max_new_tokens=8, top_k=10,
+        generator=torch.Generator().manual_seed(42),
+    )
+    assert torch.equal(torch.get_rng_state(), global_state)
+
+    torch.rand(20)
+    second = model.generate(
+        prompt, max_new_tokens=8, top_k=10,
+        generator=torch.Generator().manual_seed(42),
+    )
+    different = model.generate(
+        prompt, max_new_tokens=8, top_k=10,
+        generator=torch.Generator().manual_seed(43),
+    )
+    assert torch.equal(first, second)
+    assert not torch.equal(first, different)
+
+
 def test_no_repeat_ngram_blocks_each_rows_repeated_phrase(monkeypatch) -> None:
     model = GPT(make_config())
 

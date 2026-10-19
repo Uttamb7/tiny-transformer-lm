@@ -134,6 +134,7 @@ class GPT(nn.Module):
         repetition_penalty: float = 1.0,
         no_repeat_ngram_size: int | None = None,
         use_cache: bool = True,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """Append tokens, optionally stopping each row at a newly generated EOS.
 
@@ -254,7 +255,7 @@ class GPT(nn.Module):
                 )
 
             probs = F.softmax(logits, dim=-1)
-            next_id = torch.multinomial(probs, num_samples=1)
+            next_id = torch.multinomial(probs, num_samples=1, generator=generator)
             if eos_token_id is not None:
                 next_id = next_id.masked_fill(finished[:, None], eos_token_id)
                 finished |= next_id.squeeze(-1) == eos_token_id
