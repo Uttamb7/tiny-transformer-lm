@@ -42,6 +42,35 @@ def test_generate_cli_uses_dedicated_sampling_generator(tmp_path, monkeypatch) -
     assert captured["draw"] == torch.rand((), generator=torch.Generator().manual_seed(42)).item()
 
 
+def test_generate_cli_requests_greedy_decoding(tmp_path, monkeypatch) -> None:
+    tokenizer = ByteLevelBPETokenizer.train("", vocab_size=256)
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer.save(tokenizer_path)
+    captured = {}
+
+    class Model:
+        def generate(self, idx, **options):
+            captured.update(options)
+            return idx
+
+    monkeypatch.setitem(
+        generate_cli["main"].__globals__,
+        "load_model",
+        lambda checkpoint_path, device: (Model(), {"step": 0, "val_loss": 0.0}),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate.py", "--checkpoint", str(tmp_path / "unused.pt"),
+            "--tokenizer", str(tokenizer_path), "--device", "cpu", "--greedy",
+        ],
+    )
+    generate_cli["main"]()
+
+    assert captured["do_sample"] is False
+
+
 def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     tokenizer = ByteLevelBPETokenizer.train("", vocab_size=256)
     tokenizer_path = tmp_path / "tokenizer.json"

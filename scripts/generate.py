@@ -77,6 +77,10 @@ def main() -> None:
         help="minimum tokens to generate before --eos-token can stop a sample",
     )
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument(
+        "--greedy", action="store_true",
+        help="always choose the highest-logit eligible token instead of sampling",
+    )
     default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser.add_argument("--device", type=str, default=default_device)
     args = parser.parse_args()
@@ -117,6 +121,7 @@ def main() -> None:
             min_new_tokens=args.min_new_tokens,
             repetition_penalty=args.repetition_penalty,
             no_repeat_ngram_size=args.no_repeat_ngram_size,
+            do_sample=not args.greedy,
             generator=generator,
         )
     except ValueError as error:

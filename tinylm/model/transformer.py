@@ -135,6 +135,7 @@ class GPT(nn.Module):
         no_repeat_ngram_size: int | None = None,
         use_cache: bool = True,
         generator: torch.Generator | None = None,
+        do_sample: bool = True,
     ) -> torch.Tensor:
         """Append tokens, optionally stopping each row at a newly generated EOS.
 
@@ -180,6 +181,8 @@ class GPT(nn.Module):
             or no_repeat_ngram_size < 1
         ):
             raise ValueError("no_repeat_ngram_size must be a positive integer")
+        if not isinstance(do_sample, bool):
+            raise ValueError("do_sample must be a boolean")
         if eos_token_id is not None and (
             not isinstance(eos_token_id, int)
             or isinstance(eos_token_id, bool)
@@ -254,8 +257,11 @@ class GPT(nn.Module):
                     1, sorted_idx, sorted_logits
                 )
 
-            probs = F.softmax(logits, dim=-1)
-            next_id = torch.multinomial(probs, num_samples=1, generator=generator)
+            if do_sample:
+                probs = F.softmax(logits, dim=-1)
+                next_id = torch.multinomial(probs, num_samples=1, generator=generator)
+            else:
+                next_id = torch.argmax(logits, dim=-1, keepdim=True)
             if eos_token_id is not None:
                 next_id = next_id.masked_fill(finished[:, None], eos_token_id)
                 finished |= next_id.squeeze(-1) == eos_token_id

@@ -73,6 +73,7 @@ def test_generate_appends_requested_number_of_tokens() -> None:
         (torch.ones(1, 1, dtype=torch.long), {"repetition_penalty": float("inf")}, "at least 1"),
         (torch.ones(1, 1, dtype=torch.long), {"no_repeat_ngram_size": 0}, "positive integer"),
         (torch.ones(1, 1, dtype=torch.long), {"no_repeat_ngram_size": True}, "positive integer"),
+        (torch.ones(1, 1, dtype=torch.long), {"do_sample": "no"}, "boolean"),
     ],
 )
 def test_generate_rejects_invalid_settings_before_forward(
@@ -90,6 +91,24 @@ def test_generate_zero_token_budget_is_a_noop() -> None:
     model = GPT(make_config())
     prompt = torch.tensor([[1, 2]])
     assert torch.equal(model.generate(prompt, max_new_tokens=0), prompt)
+
+
+def test_greedy_generation_selects_each_rows_highest_eligible_logit(monkeypatch) -> None:
+    model = GPT(make_config())
+
+    def forward(idx):
+        logits = torch.full((2, 1, model.config.vocab_size), -100.0)
+        logits[0, 0, 4], logits[0, 0, 5] = 10.0, 9.0
+        logits[1, 0, 6], logits[1, 0, 7] = 8.0, 7.0
+        return logits, None
+
+    monkeypatch.setattr(model, "forward", forward)
+    monkeypatch.setattr(torch, "multinomial", lambda *args, **kwargs: pytest.fail("sampled"))
+    prompt = torch.tensor([[1], [2]])
+    out = model.generate(
+        prompt, max_new_tokens=1, do_sample=False, top_k=2, top_p=0.9, use_cache=False
+    )
+    assert out[:, -1].tolist() == [4, 6]
 
 
 @pytest.mark.parametrize("repeated_logit,new_logit", [(10.0, 9.0), (-1.0, -1.5)])
@@ -309,7 +328,8 @@ def test_generate_rejects_invalid_eos_before_forward(monkeypatch, eos_token_id) 
 
 
 @pytest.mark.parametrize("use_fused_attn", [False, True])
-def test_cached_generation_matches_recomputation(use_fused_attn) -> None:
+@pytest.mark.parametrize("do_sample", [False, True])
+def test_cached_generation_matches_recomputation(use_fused_attn, do_sample) -> None:
     torch.manual_seed(0)
     model = GPT(make_config(block_size=6), use_fused_attn=use_fused_attn)
     prompt = torch.tensor([[1, 2, 3], [4, 5, 6]])
@@ -317,12 +337,12 @@ def test_cached_generation_matches_recomputation(use_fused_attn) -> None:
     torch.manual_seed(42)
     cached = model.generate(
         prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2,
-        no_repeat_ngram_size=2,
+        no_repeat_ngram_size=2, do_sample=do_sample,
     )
     torch.manual_seed(42)
     uncached = model.generate(
         prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2,
-        no_repeat_ngram_size=2, use_cache=False,
+        no_repeat_ngram_size=2, use_cache=False, do_sample=do_sample,
     )
 
     assert torch.equal(cached, uncached)
