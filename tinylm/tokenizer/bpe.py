@@ -78,6 +78,10 @@ class ByteLevelBPETokenizer:
     ) -> ByteLevelBPETokenizer:
         if vocab_size < NUM_BASE_BYTES:
             raise ValueError(f"vocab_size must be >= {NUM_BASE_BYTES}, got {vocab_size}")
+        if any(not isinstance(token, str) or not token for token in special_tokens):
+            raise ValueError("special tokens must be non-empty strings")
+        if len(set(special_tokens)) != len(special_tokens):
+            raise ValueError("special tokens must be unique")
 
         compiled = re.compile(pattern)
         documents = (text,) if isinstance(text, str) else text

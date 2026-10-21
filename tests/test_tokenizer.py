@@ -64,6 +64,23 @@ def test_train_rejects_vocab_size_below_256() -> None:
         ByteLevelBPETokenizer.train("hello", vocab_size=100)
 
 
+@pytest.mark.parametrize(
+    "special_tokens,message",
+    [(("",), "non-empty strings"), (("<same>", "<same>"), "unique"), ((1,), "non-empty strings")],
+)
+def test_train_rejects_invalid_special_tokens(special_tokens, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        ByteLevelBPETokenizer.train("ordinary text", 256, special_tokens=special_tokens)
+
+
+def test_special_token_ids_follow_the_ordinary_vocabulary() -> None:
+    tokenizer = ByteLevelBPETokenizer.train(
+        "ordinary text", 256, special_tokens=("<first>", "<second>")
+    )
+    assert tokenizer.special_tokens == {"<first>": 256, "<second>": 257}
+    assert tokenizer.vocab_size == 258
+
+
 def test_document_encoding_uses_reserved_separator_without_cross_boundary_merges() -> None:
     tokenizer = ByteLevelBPETokenizer.train(["aaaa", "bbbb"], vocab_size=258)
     ids = tokenizer.encode_documents(["aaaa", "bbbb"])
