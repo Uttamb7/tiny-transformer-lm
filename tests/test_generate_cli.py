@@ -20,6 +20,8 @@ def test_generate_cli_uses_dedicated_sampling_generator(tmp_path, monkeypatch) -
     captured = {}
 
     class Model:
+        config = GPTConfig(vocab_size=tokenizer.vocab_size)
+
         def generate(self, idx, **options):
             generator = options["generator"]
             captured["seed"] = generator.initial_seed()
@@ -49,6 +51,8 @@ def test_generate_cli_requests_greedy_decoding(tmp_path, monkeypatch) -> None:
     captured = {}
 
     class Model:
+        config = GPTConfig(vocab_size=tokenizer.vocab_size)
+
         def generate(self, idx, **options):
             captured.update(options)
             return idx
@@ -149,6 +153,13 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     )
     assert unknown_prompt_token.returncode == 2
     assert "unknown special token" in unknown_prompt_token.stderr
+    mismatched_tokenizer = ByteLevelBPETokenizer.train("aaaa", vocab_size=258)
+    mismatched_path = tmp_path / "mismatched-tokenizer.json"
+    mismatched_tokenizer.save(mismatched_path)
+    mismatch = run("--tokenizer", str(mismatched_path))
+    assert mismatch.returncode == 2
+    assert "tokenizer vocabulary size 258" in mismatch.stderr
+    assert "checkpoint vocabulary size 257" in mismatch.stderr
     missing_eos = run("--min-new-tokens", "1")
     assert missing_eos.returncode == 2
     assert "requires --eos-token" in missing_eos.stderr

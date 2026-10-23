@@ -98,6 +98,12 @@ def main() -> None:
     except ValueError as error:
         parser.error(str(error))
     model, ckpt = load_model(args.checkpoint, args.device)
+    if tokenizer.vocab_size != model.config.vocab_size:
+        parser.error(
+            "tokenizer vocabulary size "
+            f"{tokenizer.vocab_size} does not match checkpoint vocabulary size "
+            f"{model.config.vocab_size}"
+        )
     generator = (
         torch.Generator(device=torch.device(args.device)).manual_seed(args.seed)
         if args.seed is not None
