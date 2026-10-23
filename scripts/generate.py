@@ -69,6 +69,10 @@ def main() -> None:
         help="prevent generation from repeating an n-gram of this size",
     )
     parser.add_argument(
+        "--suppress-special", action="append", default=[], metavar="TOKEN",
+        help="forbid a tokenizer special token during generation (repeatable)",
+    )
+    parser.add_argument(
         "--eos-token", type=str, default=None,
         help="stop after generating this tokenizer special token (e.g. <|endoftext|>)",
     )
@@ -88,6 +92,9 @@ def main() -> None:
     tokenizer = ByteLevelBPETokenizer.load(args.tokenizer)
     if args.eos_token is not None and args.eos_token not in tokenizer.special_tokens:
         parser.error(f"unknown special token: {args.eos_token!r}")
+    unknown_suppressed = set(args.suppress_special) - tokenizer.special_tokens.keys()
+    if unknown_suppressed:
+        parser.error(f"unknown special token: {min(unknown_suppressed)!r}")
     if args.min_new_tokens > args.max_new_tokens:
         parser.error("--min-new-tokens must not exceed --max-new-tokens")
     if args.min_new_tokens and args.eos_token is None:
@@ -127,6 +134,9 @@ def main() -> None:
             min_new_tokens=args.min_new_tokens,
             repetition_penalty=args.repetition_penalty,
             no_repeat_ngram_size=args.no_repeat_ngram_size,
+            suppress_token_ids=[
+                tokenizer.special_tokens[token] for token in args.suppress_special
+            ],
             do_sample=not args.greedy,
             generator=generator,
         )

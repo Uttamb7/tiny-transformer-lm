@@ -84,6 +84,9 @@ python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "<|endoftext|
 # Prevent exact three-token phrases from repeating within a completion
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --no-repeat-ngram-size 3
 
+# Keep a reserved token out of a fixed-length completion
+python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --suppress-special "<|endoftext|>"
+
 # Optional: stop when a tokenizer special token is generated
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --eos-token "<|endoftext|>"
 # Require at least 20 continuation tokens before that end token can stop generation
@@ -104,6 +107,8 @@ Prompt text uses ordinary byte encoding by default. Repeat `--allowed-special TO
 to opt specific reserved token names into special-token recognition in the prompt.
 `--no-repeat-ngram-size N` prevents each sample from recreating an exact `N`-token
 phrase already present in its prompt or generated continuation.
+Repeat `--suppress-special TOKEN` to make named reserved tokens ineligible during
+generation; unknown names fail before checkpoint loading.
 `--min-new-tokens N` suppresses that end token until `N` continuation tokens have
 been generated; it requires `--eos-token` and cannot exceed the generation budget.
 The library equivalent is `GPT.generate(..., eos_token_id=token_id)`: each batch

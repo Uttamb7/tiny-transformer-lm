@@ -73,6 +73,14 @@ def test_generate_appends_requested_number_of_tokens() -> None:
         (torch.ones(1, 1, dtype=torch.long), {"repetition_penalty": float("inf")}, "at least 1"),
         (torch.ones(1, 1, dtype=torch.long), {"no_repeat_ngram_size": 0}, "positive integer"),
         (torch.ones(1, 1, dtype=torch.long), {"no_repeat_ngram_size": True}, "positive integer"),
+        (torch.ones(1, 1, dtype=torch.long), {"suppress_token_ids": [-1]}, "vocabulary token IDs"),
+        (torch.ones(1, 1, dtype=torch.long), {"suppress_token_ids": [64]}, "vocabulary token IDs"),
+        (
+            torch.ones(1, 1, dtype=torch.long),
+            {"suppress_token_ids": [True]},
+            "vocabulary token IDs",
+        ),
+        (torch.ones(1, 1, dtype=torch.long), {"suppress_token_ids": 1}, "collection"),
         (torch.ones(1, 1, dtype=torch.long), {"do_sample": "no"}, "boolean"),
     ],
 )
@@ -201,6 +209,30 @@ def test_no_repeat_ngram_reports_exhausted_vocabulary(monkeypatch) -> None:
     with pytest.raises(ValueError, match="banned every token"):
         model.generate(
             prompt, max_new_tokens=1, no_repeat_ngram_size=1, use_cache=False
+        )
+
+
+def test_generate_suppresses_tokens_and_reports_exhaustion(monkeypatch) -> None:
+    model = GPT(make_config())
+
+    def forward(idx):
+        logits = torch.full((idx.size(0), 1, model.config.vocab_size), -100.0)
+        logits[:, :, 2], logits[:, :, 3] = 10.0, 9.0
+        return logits, None
+
+    monkeypatch.setattr(model, "forward", forward)
+    prompt = torch.tensor([[1], [4]])
+    default = model.generate(prompt, max_new_tokens=1, top_k=1, use_cache=False)
+    suppressed = model.generate(
+        prompt, max_new_tokens=1, top_k=1, suppress_token_ids=[2], use_cache=False
+    )
+    assert default[:, -1].tolist() == [2, 2]
+    assert suppressed[:, -1].tolist() == [3, 3]
+
+    with pytest.raises(ValueError, match="banned every token"):
+        model.generate(
+            prompt[:1], max_new_tokens=1,
+            suppress_token_ids=range(model.config.vocab_size), use_cache=False,
         )
 
 
@@ -337,12 +369,13 @@ def test_cached_generation_matches_recomputation(use_fused_attn, do_sample) -> N
     torch.manual_seed(42)
     cached = model.generate(
         prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2,
-        no_repeat_ngram_size=2, do_sample=do_sample,
+        no_repeat_ngram_size=2, suppress_token_ids=[0, 63], do_sample=do_sample,
     )
     torch.manual_seed(42)
     uncached = model.generate(
         prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2,
-        no_repeat_ngram_size=2, use_cache=False, do_sample=do_sample,
+        no_repeat_ngram_size=2, suppress_token_ids=[0, 63],
+        use_cache=False, do_sample=do_sample,
     )
 
     assert torch.equal(cached, uncached)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Collection
 
 import torch
 import torch.nn as nn
@@ -133,6 +134,7 @@ class GPT(nn.Module):
         min_new_tokens: int = 0,
         repetition_penalty: float = 1.0,
         no_repeat_ngram_size: int | None = None,
+        suppress_token_ids: Collection[int] | None = None,
         use_cache: bool = True,
         generator: torch.Generator | None = None,
         do_sample: bool = True,
@@ -181,6 +183,21 @@ class GPT(nn.Module):
             or no_repeat_ngram_size < 1
         ):
             raise ValueError("no_repeat_ngram_size must be a positive integer")
+        if suppress_token_ids is None:
+            suppressed: set[int] = set()
+        elif isinstance(suppress_token_ids, (str, bytes)) or not isinstance(
+            suppress_token_ids, Collection
+        ):
+            raise ValueError("suppress_token_ids must be a collection of vocabulary token IDs")
+        else:
+            suppressed = set(suppress_token_ids)
+            if any(
+                not isinstance(token_id, int)
+                or isinstance(token_id, bool)
+                or not 0 <= token_id < self.config.vocab_size
+                for token_id in suppressed
+            ):
+                raise ValueError("suppress_token_ids must contain only model vocabulary token IDs")
         if not isinstance(do_sample, bool):
             raise ValueError("do_sample must be a boolean")
         if eos_token_id is not None and (
@@ -221,6 +238,9 @@ class GPT(nn.Module):
                     repeated / repetition_penalty,
                 )
                 logits.scatter_(1, idx, repeated)
+
+            if suppressed:
+                logits[:, list(suppressed)] = float("-inf")
 
             if no_repeat_ngram_size is not None:
                 size = no_repeat_ngram_size

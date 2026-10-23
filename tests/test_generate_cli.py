@@ -106,6 +106,9 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     default = run()
     assert default.returncode == 0, default.stderr
     assert default.stdout.splitlines()[-1] == "Hi" + "<|endoftext|>" * 3
+    suppressed = run("--suppress-special", "<|endoftext|>")
+    assert suppressed.returncode == 0, suppressed.stderr
+    assert suppressed.stdout.splitlines()[-1] == "Hixxx"
     special_prompt = run(
         "--prompt", "<|endoftext|>", "--allowed-special", "<|endoftext|>",
         "--no-repeat-ngram-size", "1", "--max-new-tokens", "1",
@@ -153,6 +156,13 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     )
     assert unknown_prompt_token.returncode == 2
     assert "unknown special token" in unknown_prompt_token.stderr
+    unknown_suppressed = subprocess.run(
+        [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
+         "--tokenizer", str(tokenizer_path), "--suppress-special", "<missing>"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert unknown_suppressed.returncode == 2
+    assert "unknown special token" in unknown_suppressed.stderr
     mismatched_tokenizer = ByteLevelBPETokenizer.train("aaaa", vocab_size=258)
     mismatched_path = tmp_path / "mismatched-tokenizer.json"
     mismatched_tokenizer.save(mismatched_path)
