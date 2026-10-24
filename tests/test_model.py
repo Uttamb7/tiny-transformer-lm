@@ -81,6 +81,9 @@ def test_generate_appends_requested_number_of_tokens() -> None:
             "vocabulary token IDs",
         ),
         (torch.ones(1, 1, dtype=torch.long), {"suppress_token_ids": 1}, "collection"),
+        (torch.ones(1, 1, dtype=torch.long), {"stop_sequences": [[]]}, "non-empty"),
+        (torch.ones(1, 1, dtype=torch.long), {"stop_sequences": [[64]]}, "vocabulary"),
+        (torch.ones(1, 1, dtype=torch.long), {"stop_sequences": [1]}, "token sequences"),
         (torch.ones(1, 1, dtype=torch.long), {"do_sample": "no"}, "boolean"),
     ],
 )
@@ -263,6 +266,28 @@ def test_generate_stops_at_first_new_eos(monkeypatch, eos_token_id) -> None:
     assert len(calls) == 1
 
 
+def test_generate_stops_batched_rows_on_complete_new_token_sequences(monkeypatch) -> None:
+    model = GPT(make_config())
+    choices = [[3, 2], [4, 3], [0, 4]]
+    calls = []
+
+    def forward(idx):
+        logits = torch.full((2, 1, model.config.vocab_size), -100.0)
+        for row, token in enumerate(choices[len(calls)]):
+            logits[row, 0, token] = 100.0
+        calls.append(idx.clone())
+        return logits, None
+
+    monkeypatch.setattr(model, "forward", forward)
+    prompt = torch.tensor([[3, 4], [3, 4]])
+    out = model.generate(
+        prompt, max_new_tokens=5, stop_sequences=[[3, 4]], top_k=1, use_cache=False
+    )
+
+    assert out.tolist() == [[3, 4, 3, 4, 4], [3, 4, 2, 3, 4]]
+    assert len(calls) == 3
+
+
 def test_generate_delays_eos_until_minimum_new_tokens(monkeypatch) -> None:
     model = GPT(make_config())
 
@@ -418,6 +443,22 @@ def test_cached_generation_matches_batched_eos_stopping(use_fused_attn) -> None:
 
     assert torch.equal(cached, uncached)
     assert cached[0, prompt.size(1) :].eq(eos_token_id).all()
+
+
+@pytest.mark.parametrize("use_fused_attn", [False, True])
+def test_cached_generation_matches_token_sequence_stopping(use_fused_attn) -> None:
+    torch.manual_seed(7)
+    model = GPT(make_config(), use_fused_attn=use_fused_attn)
+    prompt = torch.tensor([[1, 2, 3], [4, 5, 6]])
+    reference = model.generate(prompt, max_new_tokens=2, top_k=1, use_cache=False)
+    stop = reference[0, prompt.size(1) :].tolist()
+
+    cached = model.generate(prompt, max_new_tokens=6, top_k=1, stop_sequences=[stop])
+    uncached = model.generate(
+        prompt, max_new_tokens=6, top_k=1, stop_sequences=[stop], use_cache=False
+    )
+
+    assert torch.equal(cached, uncached)
 
 
 @pytest.mark.parametrize("use_fused_attn", [False, True])

@@ -92,6 +92,9 @@ python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --eo
 # Require at least 20 continuation tokens before that end token can stop generation
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --eos-token "<|endoftext|>" --min-new-tokens 20
 
+# Stop after generating an ordinary multi-token delimiter
+python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --stop "\n\n"
+
 # 4. Evaluate / compare
 python scripts/evaluate.py eval --checkpoint runs/tiny/best.pt
 python scripts/evaluate.py compare runs/nano runs/tiny runs/small
@@ -111,6 +114,8 @@ Repeat `--suppress-special TOKEN` to make named reserved tokens ineligible durin
 generation; unknown names fail before checkpoint loading.
 `--min-new-tokens N` suppresses that end token until `N` continuation tokens have
 been generated; it requires `--eos-token` and cannot exceed the generation budget.
+Repeat `--stop TEXT` to stop after any complete generated token sequence; the
+matching text is retained, and matching text already present in the prompt is ignored.
 The library equivalent is `GPT.generate(..., eos_token_id=token_id)`: each batch
 row stops at its first newly generated end token and is padded with that token
 until all rows finish or the budget runs out. End tokens already in the prompt

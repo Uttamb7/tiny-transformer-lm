@@ -42,6 +42,16 @@ def load_model(checkpoint_path: Path, device: str) -> tuple[GPT, dict]:
     return model, ckpt
 
 
+def trim_at_stop(ids: list[int], prompt_length: int, stops: list[list[int]]) -> list[int]:
+    end = len(ids)
+    for stop in stops:
+        for start in range(prompt_length, len(ids) - len(stop) + 1):
+            if ids[start : start + len(stop)] == stop:
+                end = min(end, start + len(stop))
+                break
+    return ids[:end]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True)
@@ -77,6 +87,10 @@ def main() -> None:
         help="stop after generating this tokenizer special token (e.g. <|endoftext|>)",
     )
     parser.add_argument(
+        "--stop", action="append", default=[], metavar="TEXT",
+        help="stop after generating this text (repeatable)",
+    )
+    parser.add_argument(
         "--min-new-tokens", type=nonnegative_int, default=0,
         help="minimum tokens to generate before --eos-token can stop a sample",
     )
@@ -102,8 +116,13 @@ def main() -> None:
     eos_token_id = tokenizer.special_tokens.get(args.eos_token)
     try:
         prompt_ids = tokenizer.encode(args.prompt, allowed_special=args.allowed_special)
+        stop_sequences = [
+            tokenizer.encode(stop, allowed_special=args.allowed_special) for stop in args.stop
+        ]
     except ValueError as error:
         parser.error(str(error))
+    if any(not sequence for sequence in stop_sequences):
+        parser.error("--stop values must encode to at least one token")
     model, ckpt = load_model(args.checkpoint, args.device)
     if tokenizer.vocab_size != model.config.vocab_size:
         parser.error(
@@ -137,17 +156,25 @@ def main() -> None:
             suppress_token_ids=[
                 tokenizer.special_tokens[token] for token in args.suppress_special
             ],
+            stop_sequences=stop_sequences,
             do_sample=not args.greedy,
             generator=generator,
         )
     except ValueError as error:
         parser.error(str(error))
+    display_stops = [*stop_sequences]
+    if eos_token_id is not None:
+        display_stops.append([eos_token_id])
+    decoded = [
+        tokenizer.decode(trim_at_stop(row.tolist(), len(prompt_ids), display_stops))
+        for row in out_ids
+    ]
     if args.num_samples == 1:
-        print(tokenizer.decode(out_ids[0].tolist()))
+        print(decoded[0])
     else:
-        for sample, row in enumerate(out_ids, 1):
+        for sample, text in enumerate(decoded, 1):
             print(f"--- sample {sample} ---")
-            print(tokenizer.decode(row.tolist()))
+            print(text)
 
 
 if __name__ == "__main__":

@@ -135,6 +135,7 @@ class GPT(nn.Module):
         repetition_penalty: float = 1.0,
         no_repeat_ngram_size: int | None = None,
         suppress_token_ids: Collection[int] | None = None,
+        stop_sequences: Collection[Collection[int]] | None = None,
         use_cache: bool = True,
         generator: torch.Generator | None = None,
         do_sample: bool = True,
@@ -198,6 +199,30 @@ class GPT(nn.Module):
                 for token_id in suppressed
             ):
                 raise ValueError("suppress_token_ids must contain only model vocabulary token IDs")
+        if stop_sequences is None:
+            stops: list[tuple[int, ...]] = []
+        elif isinstance(stop_sequences, (str, bytes)) or not isinstance(
+            stop_sequences, Collection
+        ):
+            raise ValueError("stop_sequences must be a collection of token sequences")
+        else:
+            stops = []
+            for sequence in stop_sequences:
+                if (
+                    isinstance(sequence, (str, bytes))
+                    or not isinstance(sequence, Collection)
+                    or not sequence
+                    or any(
+                        not isinstance(token_id, int)
+                        or isinstance(token_id, bool)
+                        or not 0 <= token_id < self.config.vocab_size
+                        for token_id in sequence
+                    )
+                ):
+                    raise ValueError(
+                        "stop_sequences must contain non-empty model vocabulary token sequences"
+                    )
+                stops.append(tuple(sequence))
         if not isinstance(do_sample, bool):
             raise ValueError("do_sample must be a boolean")
         if eos_token_id is not None and (
@@ -216,8 +241,11 @@ class GPT(nn.Module):
             raise ValueError("min_new_tokens must not exceed max_new_tokens")
         if min_new_tokens and eos_token_id is None:
             raise ValueError("min_new_tokens requires eos_token_id")
+        if eos_token_id is not None:
+            stops.append((eos_token_id,))
         self.eval()
         finished = torch.zeros(idx.size(0), dtype=torch.bool, device=idx.device)
+        padding_ids = torch.zeros(idx.size(0), dtype=torch.long, device=idx.device)
         cache: list[KVCache] | None = None
         for generated in range(max_new_tokens):
             if use_cache and cache is not None and cache[0][0].size(2) < self.config.block_size:
@@ -259,6 +287,7 @@ class GPT(nn.Module):
             if eos_token_id is not None and generated < min_new_tokens:
                 logits[:, eos_token_id] = float("-inf")
 
+            logits[finished] = 0
             exhausted = ~torch.isfinite(logits).any(dim=1) & ~finished
             if exhausted.any():
                 raise ValueError("generation constraints banned every token")
@@ -282,10 +311,18 @@ class GPT(nn.Module):
                 next_id = torch.multinomial(probs, num_samples=1, generator=generator)
             else:
                 next_id = torch.argmax(logits, dim=-1, keepdim=True)
-            if eos_token_id is not None:
-                next_id = next_id.masked_fill(finished[:, None], eos_token_id)
-                finished |= next_id.squeeze(-1) == eos_token_id
+            if stops:
+                next_id = torch.where(finished[:, None], padding_ids[:, None], next_id)
             idx = torch.cat((idx, next_id), dim=1)
-            if eos_token_id is not None and finished.all():
+            if stops:
+                newly_finished = torch.zeros_like(finished)
+                for sequence in stops:
+                    if len(sequence) <= generated + 1:
+                        expected = torch.tensor(sequence, dtype=torch.long, device=idx.device)
+                        newly_finished |= (idx[:, -len(sequence):] == expected).all(dim=1)
+                newly_finished &= ~finished
+                padding_ids[newly_finished] = next_id[newly_finished, 0]
+                finished |= newly_finished
+            if stops and finished.all():
                 break
         return idx

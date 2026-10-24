@@ -124,6 +124,11 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     minimum = run("--eos-token", "<|endoftext|>", "--min-new-tokens", "2")
     assert minimum.returncode == 0, minimum.stderr
     assert minimum.stdout.splitlines()[-1] == "Hixx<|endoftext|>"
+    stopped_text = run(
+        "--suppress-special", "<|endoftext|>", "--stop", "xx",
+    )
+    assert stopped_text.returncode == 0, stopped_text.stderr
+    assert stopped_text.stdout.splitlines()[-1] == "Hixx"
     batched = run("--num-samples", "3")
     assert batched.returncode == 0, batched.stderr
     assert batched.stdout.count("--- sample ") == 3
@@ -143,6 +148,13 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     )
     assert invalid_samples.returncode == 2
     assert "must be a positive integer" in invalid_samples.stderr
+    empty_stop = subprocess.run(
+        [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
+         "--tokenizer", str(tokenizer_path), "--stop", ""],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert empty_stop.returncode == 2
+    assert "must encode to at least one token" in empty_stop.stderr
     invalid_ngram = subprocess.run(
         [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
          "--no-repeat-ngram-size", "0"], capture_output=True, text=True, timeout=30,
