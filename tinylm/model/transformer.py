@@ -130,6 +130,7 @@ class GPT(nn.Module):
         temperature: float = 1.0,
         top_k: int | None = None,
         top_p: float | None = None,
+        min_p: float | None = None,
         eos_token_id: int | None = None,
         min_new_tokens: int = 0,
         repetition_penalty: float = 1.0,
@@ -171,6 +172,13 @@ class GPT(nn.Module):
             or not 0 < top_p <= 1
         ):
             raise ValueError("top_p must be finite and in (0, 1]")
+        if min_p is not None and (
+            not isinstance(min_p, (int, float))
+            or isinstance(min_p, bool)
+            or not math.isfinite(min_p)
+            or not 0 < min_p <= 1
+        ):
+            raise ValueError("min_p must be finite and in (0, 1]")
         if (
             not isinstance(repetition_penalty, (int, float))
             or isinstance(repetition_penalty, bool)
@@ -295,6 +303,11 @@ class GPT(nn.Module):
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                 logits[logits < v[:, [-1]]] = float("-inf")
+
+            if min_p is not None:
+                logits[logits < logits.max(dim=-1, keepdim=True).values + math.log(min_p)] = (
+                    float("-inf")
+                )
 
             if top_p is not None:
                 sorted_logits, sorted_idx = torch.sort(logits, descending=True)

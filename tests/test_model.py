@@ -69,6 +69,8 @@ def test_generate_appends_requested_number_of_tokens() -> None:
         (torch.ones(1, 1, dtype=torch.long), {"top_k": 0}, "positive integer"),
         (torch.ones(1, 1, dtype=torch.long), {"top_p": 0}, "in \\(0, 1]"),
         (torch.ones(1, 1, dtype=torch.long), {"top_p": float("nan")}, "in \\(0, 1]"),
+        (torch.ones(1, 1, dtype=torch.long), {"min_p": 0}, "in \\(0, 1]"),
+        (torch.ones(1, 1, dtype=torch.long), {"min_p": float("inf")}, "in \\(0, 1]"),
         (torch.ones(1, 1, dtype=torch.long), {"repetition_penalty": 0.9}, "at least 1"),
         (torch.ones(1, 1, dtype=torch.long), {"repetition_penalty": float("inf")}, "at least 1"),
         (torch.ones(1, 1, dtype=torch.long), {"no_repeat_ngram_size": 0}, "positive integer"),
@@ -142,6 +144,30 @@ def test_repetition_penalty_changes_each_rows_next_choice(
     )
     assert default[:, -1].tolist() == [1, 2]
     assert penalized[:, -1].tolist() == [2, 1]
+
+
+def test_min_p_filters_each_row_relative_to_its_best_token(monkeypatch) -> None:
+    model = GPT(make_config())
+    captured = []
+
+    def forward(idx):
+        logits = torch.full((2, 1, model.config.vocab_size), -100.0)
+        logits[0, 0, 2], logits[0, 0, 3] = 10.0, 8.0
+        logits[1, 0, 4], logits[1, 0, 5] = 5.0, 4.0
+        return logits, None
+
+    def sample(probs, num_samples, generator=None):
+        captured.append(probs.clone())
+        return probs.argmax(dim=-1, keepdim=True)
+
+    monkeypatch.setattr(model, "forward", forward)
+    monkeypatch.setattr(torch, "multinomial", sample)
+    model.generate(
+        torch.tensor([[1], [1]]), max_new_tokens=1, min_p=0.2, use_cache=False
+    )
+
+    assert captured[0][0, 3] == 0
+    assert captured[0][1, 5] > 0
 
 
 def test_generate_is_deterministic_with_seed() -> None:
@@ -394,12 +420,13 @@ def test_cached_generation_matches_recomputation(use_fused_attn, do_sample) -> N
     torch.manual_seed(42)
     cached = model.generate(
         prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2,
-        no_repeat_ngram_size=2, suppress_token_ids=[0, 63], do_sample=do_sample,
+        min_p=0.05, no_repeat_ngram_size=2,
+        suppress_token_ids=[0, 63], do_sample=do_sample,
     )
     torch.manual_seed(42)
     uncached = model.generate(
         prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2,
-        no_repeat_ngram_size=2, suppress_token_ids=[0, 63],
+        min_p=0.05, no_repeat_ngram_size=2, suppress_token_ids=[0, 63],
         use_cache=False, do_sample=do_sample,
     )
 

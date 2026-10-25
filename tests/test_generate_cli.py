@@ -68,11 +68,13 @@ def test_generate_cli_requests_greedy_decoding(tmp_path, monkeypatch) -> None:
         [
             "generate.py", "--checkpoint", str(tmp_path / "unused.pt"),
             "--tokenizer", str(tokenizer_path), "--device", "cpu", "--greedy",
+            "--min-p", "0.2",
         ],
     )
     generate_cli["main"]()
 
     assert captured["do_sample"] is False
+    assert captured["min_p"] == 0.2
 
 
 def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
@@ -139,6 +141,9 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     invalid = run("--temperature", "0")
     assert invalid.returncode == 2
     assert "temperature must be finite and positive" in invalid.stderr
+    invalid_min_p = run("--min-p", "0")
+    assert invalid_min_p.returncode == 2
+    assert "min_p must be finite and in (0, 1]" in invalid_min_p.stderr
     invalid_penalty = run("--repetition-penalty", "0.5")
     assert invalid_penalty.returncode == 2
     assert "repetition_penalty must be finite and at least 1" in invalid_penalty.stderr

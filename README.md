@@ -78,6 +78,9 @@ python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --se
 # Choose the highest-logit token at each step instead of sampling
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --greedy
 
+# Keep tokens whose probability is at least 5% of the most likely token
+python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --min-p 0.05
+
 # Treat a reserved token in the prompt as one learned token instead of ordinary bytes
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "<|endoftext|>ROMEO:" --allowed-special "<|endoftext|>"
 
@@ -106,6 +109,8 @@ token in the loaded tokenizer; the generated end token is retained in the output
 `--seed` controls a dedicated generation sampling stream, isolated from model loading
 and other PyTorch random draws.
 `--greedy` chooses the highest eligible logit at every step; sampling remains the default.
+`--min-p P` removes tokens below `P` times the most likely token's probability for
+each sample, and can be combined with top-k and top-p filtering.
 Prompt text uses ordinary byte encoding by default. Repeat `--allowed-special TOKEN`
 to opt specific reserved token names into special-token recognition in the prompt.
 `--no-repeat-ngram-size N` prevents each sample from recreating an exact `N`-token

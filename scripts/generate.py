@@ -71,6 +71,10 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=50)
     parser.add_argument("--top-p", type=float, default=None)
     parser.add_argument(
+        "--min-p", type=float, default=None,
+        help="discard tokens below this fraction of the most likely token",
+    )
+    parser.add_argument(
         "--repetition-penalty", type=float, default=1.0,
         help="reduce logits for tokens already present in the sequence (must be >= 1)",
     )
@@ -149,6 +153,7 @@ def main() -> None:
             temperature=args.temperature,
             top_k=args.top_k,
             top_p=args.top_p,
+            min_p=args.min_p,
             eos_token_id=eos_token_id,
             min_new_tokens=args.min_new_tokens,
             repetition_penalty=args.repetition_penalty,
