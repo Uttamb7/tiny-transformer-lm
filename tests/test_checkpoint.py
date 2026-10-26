@@ -206,7 +206,16 @@ def test_resume_rejects_incomplete_and_incompatible_checkpoints(tmp_path: Path) 
     legacy_default = {**checkpoint, "train_config": {**checkpoint["train_config"]}}
     del legacy_default["train_config"]["grad_accum_steps"]
     del legacy_default["train_config"]["early_stopping_patience"]
+    del legacy_default["train_config"]["mixed_precision"]
+    del legacy_default["grad_scaler_state"]
     _make_trainer(tmp_path, config, "legacy-default", resume_checkpoint=legacy_default)
+
+    incomplete_mixed = {**checkpoint, "train_config": {**checkpoint["train_config"]}}
+    incomplete_mixed["train_config"]["mixed_precision"] = True
+    del incomplete_mixed["grad_scaler_state"]
+    trainer.train_config.mixed_precision = True
+    with pytest.raises(ValueError, match="missing grad_scaler_state"):
+        trainer.restore_checkpoint(incomplete_mixed)
 
     with pytest.raises(ValueError, match="training configuration"):
         _make_trainer(
@@ -225,3 +234,26 @@ def test_resume_rejects_incomplete_and_incompatible_checkpoints(tmp_path: Path) 
             resume_checkpoint=checkpoint,
             early_stopping_patience=2,
         )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_mixed_precision_checkpoint_restores_scaler_after_training(tmp_path: Path) -> None:
+    config = make_config()
+    trainer = _make_trainer(
+        tmp_path, config, "mixed", device="cuda", mixed_precision=True,
+        max_steps=1, eval_interval=1, eval_iters=1, batch_size=2,
+    )
+    result = trainer.train()
+    checkpoint = torch.load(
+        tmp_path / "mixed" / "last.pt", map_location="cuda", weights_only=False
+    )
+
+    restored = _make_trainer(
+        tmp_path, config, "mixed", device="cuda", mixed_precision=True,
+        max_steps=1, eval_interval=1, eval_iters=1, batch_size=2,
+        resume_checkpoint=checkpoint,
+    )
+
+    assert result["completed_step"] == 1
+    assert checkpoint["grad_scaler_state"] == trainer.scaler.state_dict()
+    assert restored.scaler.state_dict() == trainer.scaler.state_dict()

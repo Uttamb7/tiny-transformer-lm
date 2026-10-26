@@ -66,6 +66,9 @@ python scripts/train.py --config tiny --resume runs/tiny/last.pt
 # Use four micro-batches per optimizer step when memory is constrained
 python scripts/train.py --config tiny --grad-accum-steps 4
 
+# Use CUDA float16 autocast and gradient scaling
+python scripts/train.py --config tiny --mixed-precision
+
 # Stop after four validation checks without a new best loss
 python scripts/train.py --config tiny --early-stopping-patience 4
 
@@ -151,6 +154,12 @@ steps and does not change the optimizer's later training batches.
 one clipped optimizer update. Learning-rate, evaluation, and checkpoint steps remain
 optimizer-step based, while throughput includes every accumulated token. Resume
 requires the same setting; checkpoints created before this option use the default of 1.
+
+`--mixed-precision` uses native CUDA float16 autocast and gradient scaling during
+training and sampled loss estimation. Gradient clipping runs after gradients are
+unscaled. The default remains full precision, and the option requires an available
+CUDA device. Scaler state is checkpointed; resume requires the same precision mode,
+while older full-precision checkpoints remain compatible.
 
 `--early-stopping-patience` stops after that many consecutive scheduled validation
 checks fail to improve validation loss. The stopping check is retained in

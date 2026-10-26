@@ -30,6 +30,10 @@ def main() -> None:
     parser.add_argument("--device", type=str, default=default_device)
     parser.add_argument("--use-fused-attn", action="store_true")
     parser.add_argument(
+        "--mixed-precision", action="store_true",
+        help="use CUDA float16 autocast and gradient scaling",
+    )
+    parser.add_argument(
         "--grad-accum-steps",
         type=int,
         default=None,
@@ -43,6 +47,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.mixed_precision and (
+        torch.device(args.device).type != "cuda" or not torch.cuda.is_available()
+    ):
+        parser.error("--mixed-precision requires an available CUDA device")
     if args.grad_accum_steps is not None and args.grad_accum_steps < 1:
         parser.error("--grad-accum-steps must be a positive integer")
     if args.early_stopping_patience is not None and args.early_stopping_patience < 1:
@@ -66,6 +74,8 @@ def main() -> None:
         train_options["grad_accum_steps"] = args.grad_accum_steps
     if args.early_stopping_patience is not None:
         train_options["early_stopping_patience"] = args.early_stopping_patience
+    if args.mixed_precision:
+        train_options["mixed_precision"] = True
     train_config = TrainConfig(
         out_dir=str(
             args.resume.resolve().parent

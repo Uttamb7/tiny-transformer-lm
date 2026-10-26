@@ -28,6 +28,7 @@ class TrainConfig:
     eval_interval: int = 200
     eval_iters: int = 50
     early_stopping_patience: int | None = None
+    mixed_precision: bool = False
     log_interval: int = 20
     seed: int = 1337
     device: str = "cuda"
@@ -45,6 +46,12 @@ class TrainConfig:
             or self.early_stopping_patience < 1
         ):
             raise ValueError("early_stopping_patience must be a positive integer")
+        if not isinstance(self.mixed_precision, bool):
+            raise ValueError("mixed_precision must be a boolean")
+        if self.mixed_precision and (
+            torch.device(self.device).type != "cuda" or not torch.cuda.is_available()
+        ):
+            raise ValueError("mixed_precision requires an available CUDA device")
 
 
 class Trainer:
@@ -63,6 +70,7 @@ class Trainer:
         self.train_data = train_data
         self.val_data = val_data
         self.optimizer = self._build_optimizer()
+        self.scaler = torch.amp.GradScaler("cuda", enabled=train_config.mixed_precision)
         self.generator = torch.Generator().manual_seed(train_config.seed)
         self.metrics: list[dict] = []
         self.resume_step = 0
@@ -94,6 +102,7 @@ class Trainer:
         checkpoint_train_config = {**checkpoint["train_config"]}
         checkpoint_train_config.setdefault("grad_accum_steps", 1)
         checkpoint_train_config.setdefault("early_stopping_patience", None)
+        checkpoint_train_config.setdefault("mixed_precision", False)
         if checkpoint_train_config != self._resume_config():
             raise ValueError(
                 "checkpoint training configuration does not match the requested config"
@@ -104,6 +113,10 @@ class Trainer:
             raise ValueError(
                 "checkpoint attention implementation does not match the requested model"
             )
+        if self.train_config.mixed_precision:
+            if "grad_scaler_state" not in checkpoint:
+                raise ValueError("checkpoint cannot be resumed; missing grad_scaler_state")
+            self.scaler.load_state_dict(checkpoint["grad_scaler_state"])
         step = checkpoint["step"]
         if not isinstance(step, int) or step < 0 or step > self.train_config.max_steps:
             raise ValueError("checkpoint step is outside the requested training schedule")
@@ -137,6 +150,12 @@ class Trainer:
         ]
         return torch.optim.AdamW(groups, lr=self.train_config.max_lr, betas=(0.9, 0.95))
 
+    def _autocast(self):
+        return torch.autocast(
+            device_type="cuda", dtype=torch.float16,
+            enabled=self.train_config.mixed_precision,
+        )
+
     @torch.no_grad()
     def estimate_loss(self) -> dict[str, float]:
         self.model.eval()
@@ -150,7 +169,8 @@ class Trainer:
                 x, y = dataset.get_batch(
                     self.train_config.batch_size, self.train_config.device, generator
                 )
-                _, loss = self.model(x, y)
+                with self._autocast():
+                    _, loss = self.model(x, y)
                 losses[i] = loss.item()
             out[split] = losses.mean().item()
         self.model.train()
@@ -168,6 +188,7 @@ class Trainer:
         checkpoint = {
             "model_state": self.model.state_dict(),
             "optimizer_state": self.optimizer.state_dict(),
+            "grad_scaler_state": self.scaler.state_dict(),
             "model_config": self.model_config.to_dict(),
             "train_config": self._resume_config(),
             "step": step,
@@ -271,15 +292,18 @@ class Trainer:
             self.optimizer.zero_grad(set_to_none=True)
             for _ in range(cfg.grad_accum_steps):
                 x, y = self.train_data.get_batch(cfg.batch_size, cfg.device, self.generator)
-                _, loss = self.model(x, y)
+                with self._autocast():
+                    _, loss = self.model(x, y)
                 if not torch.isfinite(loss):
                     raise RuntimeError(
                         f"training diverged at step {step}: loss={loss.item()}. "
                         "Try a lower max_lr or increase warmup_steps."
                     )
-                (loss / cfg.grad_accum_steps).backward()
+                self.scaler.scale(loss / cfg.grad_accum_steps).backward()
+            self.scaler.unscale_(self.optimizer)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), cfg.grad_clip)
-            self.optimizer.step()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
 
         self.best_val_loss = best_val_loss
         self.elapsed_seconds += time.time() - t0

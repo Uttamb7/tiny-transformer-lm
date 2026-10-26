@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -310,3 +312,21 @@ def test_gradient_accumulation_requires_a_positive_integer(value, tmp_path: Path
 def test_early_stopping_requires_a_positive_integer(value, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="positive integer"):
         TrainConfig(out_dir=str(tmp_path), early_stopping_patience=value)
+
+
+def test_mixed_precision_requires_cuda(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="available CUDA"):
+        TrainConfig(out_dir=str(tmp_path), device="cpu", mixed_precision=True)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).parents[1] / "scripts" / "train.py"),
+            "--config", "missing", "--device", "cpu", "--mixed-precision",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 2
+    assert "requires an available CUDA device" in result.stderr
