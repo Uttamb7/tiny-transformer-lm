@@ -34,6 +34,10 @@ def main() -> None:
         help="use CUDA float16 autocast and gradient scaling",
     )
     parser.add_argument(
+        "--mixed-precision-dtype", choices=("float16", "bfloat16"),
+        help="autocast dtype (requires --mixed-precision; default: float16)",
+    )
+    parser.add_argument(
         "--grad-accum-steps",
         type=int,
         default=None,
@@ -47,10 +51,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.mixed_precision_dtype is not None and not args.mixed_precision:
+        parser.error("--mixed-precision-dtype requires --mixed-precision")
     if args.mixed_precision and (
         torch.device(args.device).type != "cuda" or not torch.cuda.is_available()
     ):
         parser.error("--mixed-precision requires an available CUDA device")
+    if (
+        args.mixed_precision
+        and args.mixed_precision_dtype == "bfloat16"
+        and not torch.cuda.is_bf16_supported()
+    ):
+        parser.error("bfloat16 mixed precision is not supported by this CUDA device")
     if args.grad_accum_steps is not None and args.grad_accum_steps < 1:
         parser.error("--grad-accum-steps must be a positive integer")
     if args.early_stopping_patience is not None and args.early_stopping_patience < 1:
@@ -76,6 +88,8 @@ def main() -> None:
         train_options["early_stopping_patience"] = args.early_stopping_patience
     if args.mixed_precision:
         train_options["mixed_precision"] = True
+    if args.mixed_precision_dtype is not None:
+        train_options["mixed_precision_dtype"] = args.mixed_precision_dtype
     train_config = TrainConfig(
         out_dir=str(
             args.resume.resolve().parent

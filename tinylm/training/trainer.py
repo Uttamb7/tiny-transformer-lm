@@ -29,6 +29,7 @@ class TrainConfig:
     eval_iters: int = 50
     early_stopping_patience: int | None = None
     mixed_precision: bool = False
+    mixed_precision_dtype: str = "float16"
     log_interval: int = 20
     seed: int = 1337
     device: str = "cuda"
@@ -48,10 +49,20 @@ class TrainConfig:
             raise ValueError("early_stopping_patience must be a positive integer")
         if not isinstance(self.mixed_precision, bool):
             raise ValueError("mixed_precision must be a boolean")
+        if self.mixed_precision_dtype not in {"float16", "bfloat16"}:
+            raise ValueError("mixed_precision_dtype must be float16 or bfloat16")
+        if not self.mixed_precision and self.mixed_precision_dtype != "float16":
+            raise ValueError("mixed_precision_dtype requires mixed_precision")
         if self.mixed_precision and (
             torch.device(self.device).type != "cuda" or not torch.cuda.is_available()
         ):
             raise ValueError("mixed_precision requires an available CUDA device")
+        if (
+            self.mixed_precision
+            and self.mixed_precision_dtype == "bfloat16"
+            and not torch.cuda.is_bf16_supported()
+        ):
+            raise ValueError("bfloat16 mixed precision is not supported by this CUDA device")
 
 
 class Trainer:
@@ -70,7 +81,11 @@ class Trainer:
         self.train_data = train_data
         self.val_data = val_data
         self.optimizer = self._build_optimizer()
-        self.scaler = torch.amp.GradScaler("cuda", enabled=train_config.mixed_precision)
+        self.scaler = torch.amp.GradScaler(
+            "cuda",
+            enabled=train_config.mixed_precision
+            and train_config.mixed_precision_dtype == "float16",
+        )
         self.generator = torch.Generator().manual_seed(train_config.seed)
         self.metrics: list[dict] = []
         self.resume_step = 0
@@ -103,6 +118,7 @@ class Trainer:
         checkpoint_train_config.setdefault("grad_accum_steps", 1)
         checkpoint_train_config.setdefault("early_stopping_patience", None)
         checkpoint_train_config.setdefault("mixed_precision", False)
+        checkpoint_train_config.setdefault("mixed_precision_dtype", "float16")
         if checkpoint_train_config != self._resume_config():
             raise ValueError(
                 "checkpoint training configuration does not match the requested config"
@@ -113,7 +129,10 @@ class Trainer:
             raise ValueError(
                 "checkpoint attention implementation does not match the requested model"
             )
-        if self.train_config.mixed_precision:
+        if (
+            self.train_config.mixed_precision
+            and self.train_config.mixed_precision_dtype == "float16"
+        ):
             if "grad_scaler_state" not in checkpoint:
                 raise ValueError("checkpoint cannot be resumed; missing grad_scaler_state")
             self.scaler.load_state_dict(checkpoint["grad_scaler_state"])
@@ -152,7 +171,10 @@ class Trainer:
 
     def _autocast(self):
         return torch.autocast(
-            device_type="cuda", dtype=torch.float16,
+            device_type="cuda",
+            dtype={"float16": torch.float16, "bfloat16": torch.bfloat16}[
+                self.train_config.mixed_precision_dtype
+            ],
             enabled=self.train_config.mixed_precision,
         )
 

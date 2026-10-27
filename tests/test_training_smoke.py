@@ -314,9 +314,23 @@ def test_early_stopping_requires_a_positive_integer(value, tmp_path: Path) -> No
         TrainConfig(out_dir=str(tmp_path), early_stopping_patience=value)
 
 
-def test_mixed_precision_requires_cuda(tmp_path: Path) -> None:
+def test_mixed_precision_configuration_is_validated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     with pytest.raises(ValueError, match="available CUDA"):
         TrainConfig(out_dir=str(tmp_path), device="cpu", mixed_precision=True)
+    with pytest.raises(ValueError, match="requires mixed_precision"):
+        TrainConfig(out_dir=str(tmp_path), mixed_precision_dtype="bfloat16")
+    with pytest.raises(ValueError, match="float16 or bfloat16"):
+        TrainConfig(out_dir=str(tmp_path), mixed_precision_dtype="float8")
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
+    with pytest.raises(ValueError, match="not supported"):
+        TrainConfig(
+            out_dir=str(tmp_path), device="cuda", mixed_precision=True,
+            mixed_precision_dtype="bfloat16",
+        )
 
     result = subprocess.run(
         [
@@ -330,3 +344,16 @@ def test_mixed_precision_requires_cuda(tmp_path: Path) -> None:
     )
     assert result.returncode == 2
     assert "requires an available CUDA device" in result.stderr
+
+    missing_mode = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).parents[1] / "scripts" / "train.py"),
+            "--config", "missing", "--mixed-precision-dtype", "bfloat16",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert missing_mode.returncode == 2
+    assert "requires --mixed-precision" in missing_mode.stderr

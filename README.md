@@ -69,6 +69,9 @@ python scripts/train.py --config tiny --grad-accum-steps 4
 # Use CUDA float16 autocast and gradient scaling
 python scripts/train.py --config tiny --mixed-precision
 
+# Use CUDA bfloat16 autocast on supported GPUs without gradient scaling
+python scripts/train.py --config tiny --mixed-precision --mixed-precision-dtype bfloat16
+
 # Stop after four validation checks without a new best loss
 python scripts/train.py --config tiny --early-stopping-patience 4
 
@@ -160,6 +163,9 @@ training and sampled loss estimation. Gradient clipping runs after gradients are
 unscaled. The default remains full precision, and the option requires an available
 CUDA device. Scaler state is checkpointed; resume requires the same precision mode,
 while older full-precision checkpoints remain compatible.
+Pass `--mixed-precision-dtype bfloat16` on supported CUDA devices to use bfloat16
+autocast without gradient scaling. Float16 remains the default mixed-precision dtype;
+checkpoints record the dtype and resume requires the same choice.
 
 `--early-stopping-patience` stops after that many consecutive scheduled validation
 checks fail to improve validation loss. The stopping check is retained in

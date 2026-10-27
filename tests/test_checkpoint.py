@@ -207,6 +207,7 @@ def test_resume_rejects_incomplete_and_incompatible_checkpoints(tmp_path: Path) 
     del legacy_default["train_config"]["grad_accum_steps"]
     del legacy_default["train_config"]["early_stopping_patience"]
     del legacy_default["train_config"]["mixed_precision"]
+    del legacy_default["train_config"]["mixed_precision_dtype"]
     del legacy_default["grad_scaler_state"]
     _make_trainer(tmp_path, config, "legacy-default", resume_checkpoint=legacy_default)
 
@@ -235,6 +236,13 @@ def test_resume_rejects_incomplete_and_incompatible_checkpoints(tmp_path: Path) 
             early_stopping_patience=2,
         )
 
+    dtype_mismatch = {**checkpoint, "train_config": {**checkpoint["train_config"]}}
+    dtype_mismatch["train_config"]["mixed_precision_dtype"] = "bfloat16"
+    with pytest.raises(ValueError, match="training configuration"):
+        _make_trainer(
+            tmp_path, config, "dtype-mismatch", resume_checkpoint=dtype_mismatch
+        )
+
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
 def test_mixed_precision_checkpoint_restores_scaler_after_training(tmp_path: Path) -> None:
@@ -253,7 +261,40 @@ def test_mixed_precision_checkpoint_restores_scaler_after_training(tmp_path: Pat
         max_steps=1, eval_interval=1, eval_iters=1, batch_size=2,
         resume_checkpoint=checkpoint,
     )
+    legacy_float16 = {**checkpoint, "train_config": {**checkpoint["train_config"]}}
+    del legacy_float16["train_config"]["mixed_precision_dtype"]
+    legacy_restored = _make_trainer(
+        tmp_path, config, "mixed", device="cuda", mixed_precision=True,
+        max_steps=1, eval_interval=1, eval_iters=1, batch_size=2,
+        resume_checkpoint=legacy_float16,
+    )
 
     assert result["completed_step"] == 1
     assert checkpoint["grad_scaler_state"] == trainer.scaler.state_dict()
     assert restored.scaler.state_dict() == trainer.scaler.state_dict()
+    assert legacy_restored.scaler.state_dict() == trainer.scaler.state_dict()
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available() or not torch.cuda.is_bf16_supported(),
+    reason="CUDA bfloat16 is required",
+)
+def test_bfloat16_checkpoint_resumes_without_gradient_scaling(tmp_path: Path) -> None:
+    config = make_config()
+    options = dict(
+        device="cuda", mixed_precision=True, mixed_precision_dtype="bfloat16",
+        max_steps=1, eval_interval=1, eval_iters=1, batch_size=2,
+    )
+    trainer = _make_trainer(tmp_path, config, "bfloat16", **options)
+    result = trainer.train()
+    checkpoint = torch.load(
+        tmp_path / "bfloat16" / "last.pt", map_location="cuda", weights_only=False
+    )
+    restored = _make_trainer(
+        tmp_path, config, "bfloat16", resume_checkpoint=checkpoint, **options
+    )
+
+    assert result["completed_step"] == 1
+    assert trainer.scaler.is_enabled() is False
+    assert checkpoint["train_config"]["mixed_precision_dtype"] == "bfloat16"
+    assert restored.scaler.is_enabled() is False
