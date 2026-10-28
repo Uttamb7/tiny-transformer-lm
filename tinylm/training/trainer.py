@@ -30,6 +30,7 @@ class TrainConfig:
     early_stopping_patience: int | None = None
     mixed_precision: bool = False
     mixed_precision_dtype: str = "float16"
+    gradient_checkpointing: bool = False
     log_interval: int = 20
     seed: int = 1337
     device: str = "cuda"
@@ -53,6 +54,8 @@ class TrainConfig:
             raise ValueError("mixed_precision_dtype must be float16 or bfloat16")
         if not self.mixed_precision and self.mixed_precision_dtype != "float16":
             raise ValueError("mixed_precision_dtype requires mixed_precision")
+        if not isinstance(self.gradient_checkpointing, bool):
+            raise ValueError("gradient_checkpointing must be a boolean")
         if self.mixed_precision and (
             torch.device(self.device).type != "cuda" or not torch.cuda.is_available()
         ):
@@ -76,6 +79,7 @@ class Trainer:
         resume_checkpoint: dict | None = None,
     ) -> None:
         self.model = model.to(train_config.device)
+        self.model.gradient_checkpointing = train_config.gradient_checkpointing
         self.model_config = model_config
         self.train_config = train_config
         self.train_data = train_data
@@ -119,6 +123,7 @@ class Trainer:
         checkpoint_train_config.setdefault("early_stopping_patience", None)
         checkpoint_train_config.setdefault("mixed_precision", False)
         checkpoint_train_config.setdefault("mixed_precision_dtype", "float16")
+        checkpoint_train_config.setdefault("gradient_checkpointing", False)
         if checkpoint_train_config != self._resume_config():
             raise ValueError(
                 "checkpoint training configuration does not match the requested config"

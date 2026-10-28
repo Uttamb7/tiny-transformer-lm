@@ -242,6 +242,51 @@ def test_accumulated_gradients_match_one_effective_batch(tmp_path: Path) -> None
         assert torch.allclose(models[0].state_dict()[name], expected, atol=1e-7), name
 
 
+def test_activation_checkpointing_matches_an_ordinary_training_update(tmp_path: Path) -> None:
+    class Batches:
+        def __init__(self, batch):
+            self.batch = batch
+
+        def get_batch(self, *args):
+            return self.batch
+
+    config = GPTConfig(
+        vocab_size=16, block_size=4, n_layer=2, n_head=1, n_embd=8, dropout=0.2
+    )
+    torch.manual_seed(9)
+    base = GPT(config)
+    batch = (torch.randint(0, 16, (2, 4)), torch.randint(0, 16, (2, 4)))
+    models = [GPT(config), GPT(config)]
+    for model in models:
+        model.load_state_dict(base.state_dict())
+    trainers = [
+        Trainer(
+            model,
+            config,
+            TrainConfig(
+                out_dir=str(tmp_path / f"checkpointing-{enabled}"),
+                max_steps=1,
+                warmup_steps=0,
+                batch_size=2,
+                eval_interval=1,
+                eval_iters=1,
+                gradient_checkpointing=enabled,
+                device="cpu",
+            ),
+            Batches(batch),
+            Batches(batch),
+        )
+        for model, enabled in zip(models, (False, True))
+    ]
+    for trainer in trainers:
+        torch.manual_seed(17)
+        trainer.estimate_loss = lambda: {"train": 1.0, "val": 1.0}
+        trainer.train()
+
+    for name, expected in models[0].state_dict().items():
+        assert torch.allclose(models[1].state_dict()[name], expected, atol=1e-7), name
+
+
 def test_early_stopping_saves_and_does_not_restart(tmp_path: Path) -> None:
     vocab_size = 16
     block_size = 4
@@ -357,3 +402,16 @@ def test_mixed_precision_configuration_is_validated(
     )
     assert missing_mode.returncode == 2
     assert "requires --mixed-precision" in missing_mode.stderr
+
+
+def test_gradient_checkpointing_configuration_and_cli(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="must be a boolean"):
+        TrainConfig(out_dir=str(tmp_path), gradient_checkpointing=1)
+    help_result = subprocess.run(
+        [sys.executable, str(Path(__file__).parents[1] / "scripts" / "train.py"), "--help"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert help_result.returncode == 0
+    assert "--gradient-checkpointing" in help_result.stdout

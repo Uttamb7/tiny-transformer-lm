@@ -72,6 +72,9 @@ python scripts/train.py --config tiny --mixed-precision
 # Use CUDA bfloat16 autocast on supported GPUs without gradient scaling
 python scripts/train.py --config tiny --mixed-precision --mixed-precision-dtype bfloat16
 
+# Trade extra backpropagation compute for lower activation memory
+python scripts/train.py --config tiny --gradient-checkpointing
+
 # Stop after four validation checks without a new best loss
 python scripts/train.py --config tiny --early-stopping-patience 4
 
@@ -166,6 +169,10 @@ while older full-precision checkpoints remain compatible.
 Pass `--mixed-precision-dtype bfloat16` on supported CUDA devices to use bfloat16
 autocast without gradient scaling. Float16 remains the default mixed-precision dtype;
 checkpoints record the dtype and resume requires the same choice.
+
+`--gradient-checkpointing` recomputes transformer blocks during backpropagation to
+reduce retained activation memory. Evaluation and generation are unchanged; resume
+requires the same setting, while older checkpoints retain the disabled default.
 
 `--early-stopping-patience` stops after that many consecutive scheduled validation
 checks fail to improve validation loss. The stopping check is retained in

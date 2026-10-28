@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+import tinylm.model.transformer as transformer
 from tinylm.model import GPT, GPTConfig
 
 
@@ -20,6 +21,31 @@ def test_forward_shape_with_targets() -> None:
     assert logits.shape == (3, 10, config.vocab_size)
     assert loss.ndim == 0
     assert torch.isfinite(loss)
+
+
+def test_activation_checkpointing_only_wraps_gradient_enabled_training(monkeypatch) -> None:
+    model = GPT(make_config(n_layer=2, dropout=0.0))
+    model.gradient_checkpointing = True
+    calls = 0
+    real_checkpoint = transformer.checkpoint
+
+    def counted_checkpoint(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_checkpoint(*args, **kwargs)
+
+    monkeypatch.setattr(transformer, "checkpoint", counted_checkpoint)
+    tokens = torch.randint(0, model.config.vocab_size, (2, 4))
+    _, loss = model(tokens, tokens)
+    assert loss is not None
+    loss.backward()
+    assert calls == model.config.n_layer
+
+    model.eval()
+    with torch.no_grad():
+        model(tokens, tokens)
+    model.generate(tokens[:, :1], max_new_tokens=1)
+    assert calls == model.config.n_layer
 
 
 def test_forward_shape_without_targets_returns_last_position_only() -> None:

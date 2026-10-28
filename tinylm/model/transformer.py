@@ -6,6 +6,7 @@ from collections.abc import Collection
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 from tinylm.model.attention import CausalSelfAttention, KVCache
 from tinylm.model.config import GPTConfig
@@ -49,6 +50,7 @@ class GPT(nn.Module):
         super().__init__()
         self.config = config
         self.use_fused_attn = use_fused_attn
+        self.gradient_checkpointing = False
 
         self.token_emb = nn.Embedding(config.vocab_size, config.n_embd)
         self.pos_emb = nn.Embedding(config.block_size, config.n_embd)
@@ -92,7 +94,10 @@ class GPT(nn.Module):
         pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
         x = self.drop(self.token_emb(idx) + self.pos_emb(pos))
         for block in self.blocks:
-            x = block(x)
+            if self.gradient_checkpointing and self.training and torch.is_grad_enabled():
+                x = checkpoint(block, x, use_reentrant=False)
+            else:
+                x = block(x)
         x = self.ln_f(x)
 
         if targets is not None:

@@ -38,6 +38,10 @@ def main() -> None:
         help="autocast dtype (requires --mixed-precision; default: float16)",
     )
     parser.add_argument(
+        "--gradient-checkpointing", action="store_true",
+        help="recompute transformer blocks during backpropagation to reduce activation memory",
+    )
+    parser.add_argument(
         "--grad-accum-steps",
         type=int,
         default=None,
@@ -90,6 +94,8 @@ def main() -> None:
         train_options["mixed_precision"] = True
     if args.mixed_precision_dtype is not None:
         train_options["mixed_precision_dtype"] = args.mixed_precision_dtype
+    if args.gradient_checkpointing:
+        train_options["gradient_checkpointing"] = True
     train_config = TrainConfig(
         out_dir=str(
             args.resume.resolve().parent
