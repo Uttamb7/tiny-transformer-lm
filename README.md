@@ -75,6 +75,9 @@ python scripts/train.py --config tiny --mixed-precision --mixed-precision-dtype 
 # Trade extra backpropagation compute for lower activation memory
 python scripts/train.py --config tiny --gradient-checkpointing
 
+# Smooth optimization targets while keeping validation loss unsmoothed
+python scripts/train.py --config tiny --label-smoothing 0.1
+
 # Stop after four validation checks without a new best loss
 python scripts/train.py --config tiny --early-stopping-patience 4
 
@@ -173,6 +176,10 @@ checkpoints record the dtype and resume requires the same choice.
 `--gradient-checkpointing` recomputes transformer blocks during backpropagation to
 reduce retained activation memory. Evaluation and generation are unchanged; resume
 requires the same setting, while older checkpoints retain the disabled default.
+
+`--label-smoothing P` applies PyTorch label smoothing only to optimization loss.
+Sampled train/validation metrics and perplexity remain ordinary cross-entropy for
+comparison across runs. Resume requires the same value; older checkpoints use zero.
 
 `--early-stopping-patience` stops after that many consecutive scheduled validation
 checks fail to improve validation loss. The stopping check is retained in

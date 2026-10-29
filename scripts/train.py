@@ -42,6 +42,10 @@ def main() -> None:
         help="recompute transformer blocks during backpropagation to reduce activation memory",
     )
     parser.add_argument(
+        "--label-smoothing", type=float,
+        help="training-only label smoothing in [0, 1) (default: 0)",
+    )
+    parser.add_argument(
         "--grad-accum-steps",
         type=int,
         default=None,
@@ -71,6 +75,10 @@ def main() -> None:
         parser.error("--grad-accum-steps must be a positive integer")
     if args.early_stopping_patience is not None and args.early_stopping_patience < 1:
         parser.error("--early-stopping-patience must be a positive integer")
+    if args.label_smoothing is not None and (
+        not math.isfinite(args.label_smoothing) or not 0 <= args.label_smoothing < 1
+    ):
+        parser.error("--label-smoothing must be finite and in [0, 1)")
 
     config_path = REPO_ROOT / "configs" / f"{args.config}.json"
     raw_config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -96,6 +104,8 @@ def main() -> None:
         train_options["mixed_precision_dtype"] = args.mixed_precision_dtype
     if args.gradient_checkpointing:
         train_options["gradient_checkpointing"] = True
+    if args.label_smoothing is not None:
+        train_options["label_smoothing"] = args.label_smoothing
     train_config = TrainConfig(
         out_dir=str(
             args.resume.resolve().parent

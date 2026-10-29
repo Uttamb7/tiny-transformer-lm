@@ -209,6 +209,7 @@ def test_resume_rejects_incomplete_and_incompatible_checkpoints(tmp_path: Path) 
     del legacy_default["train_config"]["mixed_precision"]
     del legacy_default["train_config"]["mixed_precision_dtype"]
     del legacy_default["train_config"]["gradient_checkpointing"]
+    del legacy_default["train_config"]["label_smoothing"]
     del legacy_default["grad_scaler_state"]
     _make_trainer(tmp_path, config, "legacy-default", resume_checkpoint=legacy_default)
 
@@ -250,6 +251,14 @@ def test_resume_rejects_incomplete_and_incompatible_checkpoints(tmp_path: Path) 
         _make_trainer(
             tmp_path, config, "checkpointing-mismatch",
             resume_checkpoint=checkpointing_mismatch,
+        )
+
+    smoothing_mismatch = {**checkpoint, "train_config": {**checkpoint["train_config"]}}
+    smoothing_mismatch["train_config"]["label_smoothing"] = 0.1
+    with pytest.raises(ValueError, match="training configuration"):
+        _make_trainer(
+            tmp_path, config, "smoothing-mismatch",
+            resume_checkpoint=smoothing_mismatch,
         )
 
 

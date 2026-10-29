@@ -85,7 +85,10 @@ class GPT(nn.Module):
         return n
 
     def forward(
-        self, idx: torch.Tensor, targets: torch.Tensor | None = None
+        self,
+        idx: torch.Tensor,
+        targets: torch.Tensor | None = None,
+        label_smoothing: float = 0.0,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         B, T = idx.shape
         if T > self.config.block_size:
@@ -103,7 +106,8 @@ class GPT(nn.Module):
         if targets is not None:
             logits = self.lm_head(x)
             loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
+                logits.view(-1, logits.size(-1)), targets.view(-1),
+                ignore_index=-1, label_smoothing=label_smoothing,
             )
             return logits, loss
         else:

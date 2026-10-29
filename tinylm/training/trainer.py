@@ -31,6 +31,7 @@ class TrainConfig:
     mixed_precision: bool = False
     mixed_precision_dtype: str = "float16"
     gradient_checkpointing: bool = False
+    label_smoothing: float = 0.0
     log_interval: int = 20
     seed: int = 1337
     device: str = "cuda"
@@ -56,6 +57,13 @@ class TrainConfig:
             raise ValueError("mixed_precision_dtype requires mixed_precision")
         if not isinstance(self.gradient_checkpointing, bool):
             raise ValueError("gradient_checkpointing must be a boolean")
+        if (
+            not isinstance(self.label_smoothing, (int, float))
+            or isinstance(self.label_smoothing, bool)
+            or not math.isfinite(self.label_smoothing)
+            or not 0 <= self.label_smoothing < 1
+        ):
+            raise ValueError("label_smoothing must be finite and in [0, 1)")
         if self.mixed_precision and (
             torch.device(self.device).type != "cuda" or not torch.cuda.is_available()
         ):
@@ -124,6 +132,7 @@ class Trainer:
         checkpoint_train_config.setdefault("mixed_precision", False)
         checkpoint_train_config.setdefault("mixed_precision_dtype", "float16")
         checkpoint_train_config.setdefault("gradient_checkpointing", False)
+        checkpoint_train_config.setdefault("label_smoothing", 0.0)
         if checkpoint_train_config != self._resume_config():
             raise ValueError(
                 "checkpoint training configuration does not match the requested config"
@@ -320,7 +329,7 @@ class Trainer:
             for _ in range(cfg.grad_accum_steps):
                 x, y = self.train_data.get_batch(cfg.batch_size, cfg.device, self.generator)
                 with self._autocast():
-                    _, loss = self.model(x, y)
+                    _, loss = self.model(x, y, label_smoothing=cfg.label_smoothing)
                 if not torch.isfinite(loss):
                     raise RuntimeError(
                         f"training diverged at step {step}: loss={loss.item()}. "

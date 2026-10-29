@@ -23,6 +23,19 @@ def test_forward_shape_with_targets() -> None:
     assert torch.isfinite(loss)
 
 
+def test_forward_label_smoothing_matches_cross_entropy() -> None:
+    model = GPT(make_config())
+    idx = torch.randint(0, model.config.vocab_size, (2, 4))
+    targets = torch.randint(0, model.config.vocab_size, (2, 4))
+
+    logits, loss = model(idx, targets, label_smoothing=0.2)
+
+    expected = torch.nn.functional.cross_entropy(
+        logits.view(-1, logits.size(-1)), targets.view(-1), label_smoothing=0.2
+    )
+    assert torch.equal(loss, expected)
+
+
 def test_activation_checkpointing_only_wraps_gradient_enabled_training(monkeypatch) -> None:
     model = GPT(make_config(n_layer=2, dropout=0.0))
     model.gradient_checkpointing = True

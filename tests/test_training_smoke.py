@@ -415,3 +415,54 @@ def test_gradient_checkpointing_configuration_and_cli(tmp_path: Path) -> None:
     )
     assert help_result.returncode == 0
     assert "--gradient-checkpointing" in help_result.stdout
+
+
+def test_label_smoothing_applies_only_to_training(tmp_path: Path) -> None:
+    for name in ("train.bin", "val.bin"):
+        make_synthetic_bin(tmp_path / name, 16, 100, 4)
+    config = GPTConfig(
+        vocab_size=16, block_size=4, n_layer=1, n_head=1, n_embd=8, dropout=0.0
+    )
+    model = GPT(config)
+    seen: list[float] = []
+    forward = model.forward
+
+    def record_forward(idx, targets=None, label_smoothing=0.0):
+        seen.append(label_smoothing)
+        return forward(idx, targets, label_smoothing)
+
+    model.forward = record_forward
+    trainer = Trainer(
+        model, config,
+        TrainConfig(
+            out_dir=str(tmp_path / "smooth"), max_steps=1, warmup_steps=0,
+            batch_size=2, eval_iters=1, label_smoothing=0.1, device="cpu",
+        ),
+        TokenDataset(tmp_path / "train.bin", 4),
+        TokenDataset(tmp_path / "val.bin", 4),
+    )
+
+    trainer.estimate_loss()
+    trainer.estimate_loss = lambda: {"train": 1.0, "val": 1.0}
+    trainer.save_checkpoint = lambda *args, **kwargs: None
+    trainer.train()
+
+    assert seen == [0.0, 0.0, 0.1]
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.0, float("inf"), float("nan"), True])
+def test_label_smoothing_is_validated(value, tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="finite and in"):
+        TrainConfig(out_dir=str(tmp_path), label_smoothing=value)
+
+    if isinstance(value, bool):
+        return
+    result = subprocess.run(
+        [
+            sys.executable, str(Path(__file__).parents[1] / "scripts" / "train.py"),
+            "--config", "missing", "--label-smoothing", str(value),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 2
+    assert "--label-smoothing must be finite and in [0, 1)" in result.stderr
