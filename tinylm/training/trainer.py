@@ -14,6 +14,20 @@ from tinylm.model import GPT, GPTConfig
 from tinylm.training.lr_schedule import get_lr
 
 
+def initialize_model(model: GPT, model_config: GPTConfig, checkpoint: object) -> None:
+    if not isinstance(checkpoint, dict):
+        raise ValueError("initialization checkpoint must be a dictionary")
+    missing = sorted({"model_config", "model_state"} - checkpoint.keys())
+    if missing:
+        raise ValueError("initialization checkpoint is missing " + ", ".join(missing))
+    if checkpoint["model_config"] != model_config.to_dict():
+        raise ValueError("initialization checkpoint model configuration does not match")
+    try:
+        model.load_state_dict(checkpoint["model_state"])
+    except (RuntimeError, TypeError, AttributeError) as error:
+        raise ValueError("initialization checkpoint model state is incompatible") from error
+
+
 @dataclass
 class TrainConfig:
     out_dir: str

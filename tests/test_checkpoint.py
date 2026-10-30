@@ -4,10 +4,9 @@ from pathlib import Path
 import pytest
 import torch
 
-from scripts.train import initialize_model
 from tinylm.data.dataset import TokenDataset
 from tinylm.model import GPT, GPTConfig
-from tinylm.training import TrainConfig, Trainer
+from tinylm.training import TrainConfig, Trainer, initialize_model
 
 
 def make_config(**overrides) -> GPTConfig:
