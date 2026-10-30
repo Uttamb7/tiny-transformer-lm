@@ -63,6 +63,9 @@ python scripts/train.py --config tiny
 # Resume an interrupted run from its latest checkpoint
 python scripts/train.py --config tiny --resume runs/tiny/last.pt
 
+# Initialize a separate run from compatible checkpoint model weights
+python scripts/train.py --config tiny --init-from runs/tiny/best.pt --run-name tiny-finetune
+
 # Use four micro-batches per optimizer step when memory is constrained
 python scripts/train.py --config tiny --grad-accum-steps 4
 
@@ -154,6 +157,12 @@ and appends to its existing `metrics.jsonl`; that log must end at the checkpoint
 step. Use the same config, device type, and `--use-fused-attn` setting. Older
 checkpoints without resume metadata fail clearly and remain usable for generation
 and evaluation.
+
+`--init-from` starts a new named run from checkpoint model weights only. The model
+configuration and prepared-data vocabulary must match exactly; optimizer, scaler,
+step, random, metric, and best-loss state all start fresh. The new run name must not
+already exist or match the source checkpoint directory; successful training produces
+ordinary resumable checkpoints.
 
 Periodic train and validation metrics use fixed split-specific sampled windows
 derived from the training seed. Evaluation therefore remains comparable between

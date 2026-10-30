@@ -18,6 +18,20 @@ from tinylm.training import TrainConfig, Trainer
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def initialize_model(model: GPT, model_config: GPTConfig, checkpoint: object) -> None:
+    if not isinstance(checkpoint, dict):
+        raise ValueError("initialization checkpoint must be a dictionary")
+    missing = sorted({"model_config", "model_state"} - checkpoint.keys())
+    if missing:
+        raise ValueError("initialization checkpoint is missing " + ", ".join(missing))
+    if checkpoint["model_config"] != model_config.to_dict():
+        raise ValueError("initialization checkpoint model configuration does not match")
+    try:
+        model.load_state_dict(checkpoint["model_state"])
+    except (RuntimeError, TypeError, AttributeError) as error:
+        raise ValueError("initialization checkpoint model state is incompatible") from error
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, help="name under configs/, e.g. 'tiny'")
@@ -26,6 +40,10 @@ def main() -> None:
     )
     parser.add_argument("--run-name", type=str, default=None)
     parser.add_argument("--resume", type=Path, default=None, help="resume an interrupted run")
+    parser.add_argument(
+        "--init-from", type=Path, default=None,
+        help="initialize a new named run from compatible checkpoint weights",
+    )
     default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser.add_argument("--device", type=str, default=default_device)
     parser.add_argument("--use-fused-attn", action="store_true")
@@ -59,6 +77,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.resume and args.init_from:
+        parser.error("--resume and --init-from are mutually exclusive")
+    if args.init_from and not args.run_name:
+        parser.error("--init-from requires --run-name")
+    initial_run_dir = REPO_ROOT / "runs" / args.run_name if args.init_from else None
+    if (
+        initial_run_dir is not None
+        and initial_run_dir.resolve() == args.init_from.resolve().parent
+    ):
+        parser.error("--init-from output must differ from the source checkpoint directory")
+    if initial_run_dir and initial_run_dir.exists():
+        parser.error("--init-from output run already exists")
     if args.mixed_precision_dtype is not None and not args.mixed_precision:
         parser.error("--mixed-precision-dtype requires --mixed-precision")
     if args.mixed_precision and (
@@ -91,6 +121,11 @@ def main() -> None:
         if args.resume
         else None
     )
+    initial_checkpoint = (
+        torch.load(args.init_from, map_location=args.device, weights_only=False)
+        if args.init_from
+        else None
+    )
     if args.resume and args.run_name:
         parser.error("--run-name cannot be used with --resume")
     train_options = {**raw_config["train"]}
@@ -110,7 +145,7 @@ def main() -> None:
         out_dir=str(
             args.resume.resolve().parent
             if args.resume
-            else REPO_ROOT / "runs" / (args.run_name or args.config)
+            else initial_run_dir or REPO_ROOT / "runs" / args.config
         ),
         device=args.device,
         **train_options,
@@ -121,6 +156,11 @@ def main() -> None:
     val_data = TokenDataset(args.data_dir / "val.bin", model_config.block_size)
 
     model = GPT(model_config, use_fused_attn=args.use_fused_attn)
+    if initial_checkpoint is not None:
+        try:
+            initialize_model(model, model_config, initial_checkpoint)
+        except ValueError as error:
+            parser.error(str(error))
     print(f"model params (non-embedding): {model.num_params():,}")
     print(f"device: {train_config.device}")
 

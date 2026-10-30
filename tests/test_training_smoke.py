@@ -417,6 +417,45 @@ def test_gradient_checkpointing_configuration_and_cli(tmp_path: Path) -> None:
     assert "--gradient-checkpointing" in help_result.stdout
 
 
+def test_checkpoint_initialization_cli_boundaries(tmp_path: Path) -> None:
+    root = Path(__file__).parents[1]
+    script = str(root / "scripts" / "train.py")
+    existing_run = root / "runs" / f".test-{tmp_path.name}"
+    existing_run.mkdir(parents=True)
+    help_result = subprocess.run(
+        [sys.executable, script, "--help"], capture_output=True, text=True, timeout=30
+    )
+    assert help_result.returncode == 0
+    assert "--init-from" in help_result.stdout
+
+    try:
+        for arguments, message in [
+            (["--resume", "last.pt", "--init-from", "best.pt"], "mutually exclusive"),
+            (["--init-from", "best.pt"], "requires --run-name"),
+            (
+                [
+                    "--init-from",
+                    str(root / "runs" / "source" / "best.pt"),
+                    "--run-name",
+                    "source",
+                ],
+                "output must differ",
+            ),
+            (
+                ["--init-from", "best.pt", "--run-name", existing_run.name],
+                "output run already exists",
+            ),
+        ]:
+            result = subprocess.run(
+                [sys.executable, script, "--config", "missing", *arguments],
+                capture_output=True, text=True, timeout=30,
+            )
+            assert result.returncode == 2
+            assert message in result.stderr
+    finally:
+        existing_run.rmdir()
+
+
 def test_label_smoothing_applies_only_to_training(tmp_path: Path) -> None:
     for name in ("train.bin", "val.bin"):
         make_synthetic_bin(tmp_path / name, 16, 100, 4)

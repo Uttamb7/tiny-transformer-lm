@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from scripts.train import initialize_model
 from tinylm.data.dataset import TokenDataset
 from tinylm.model import GPT, GPTConfig
 from tinylm.training import TrainConfig, Trainer
@@ -20,6 +21,7 @@ def _make_trainer(
     config: GPTConfig,
     run_name: str = "run",
     resume_checkpoint: dict | None = None,
+    model: GPT | None = None,
     **train_overrides,
 ) -> Trainer:
     import numpy as np
@@ -30,7 +32,6 @@ def _make_trainer(
 
     train_data = TokenDataset(tmp_path / "train.bin", config.block_size)
     val_data = TokenDataset(tmp_path / "val.bin", config.block_size)
-    model = GPT(config)
     train_options = {
         "out_dir": str(tmp_path / run_name),
         "device": "cpu",
@@ -39,7 +40,7 @@ def _make_trainer(
     train_options.update(train_overrides)
     train_config = TrainConfig(**train_options)
     return Trainer(
-        model,
+        model if model is not None else GPT(config),
         config,
         train_config,
         train_data,
@@ -105,6 +106,60 @@ def test_loading_checkpoint_with_wrong_architecture_raises(tmp_path: Path) -> No
 
     with pytest.raises(RuntimeError):
         mismatched_model.load_state_dict(loaded["model_state"])
+
+
+def test_checkpoint_initialization_inherits_only_model_weights(tmp_path: Path) -> None:
+    config = make_config()
+    source = GPT(config)
+    with torch.no_grad():
+        for parameter in source.parameters():
+            parameter.fill_(0.25)
+    checkpoint = {
+        "model_config": config.to_dict(),
+        "model_state": source.state_dict(),
+        "step": 999,
+        "best_val_loss": 0.1,
+        "optimizer_state": {"source": True},
+    }
+    target = GPT(config)
+
+    initialize_model(target, config, checkpoint)
+    trainer = _make_trainer(tmp_path, config, "initialized", model=target)
+
+    for name, expected in source.state_dict().items():
+        assert torch.equal(trainer.model.state_dict()[name], expected), name
+    assert trainer.resume_step == 0
+    assert trainer.best_val_loss == float("inf")
+    assert trainer.optimizer.state == {}
+    assert trainer.metrics == []
+    assert trainer.resumed is False
+
+    path = tmp_path / "initialized" / "last.pt"
+    trainer.save_checkpoint(path, step=0, val_loss=2.0, best_val_loss=2.0)
+    saved = torch.load(path, map_location="cpu", weights_only=False)
+    _make_trainer(tmp_path, config, "initialized", resume_checkpoint=saved)
+
+
+def test_checkpoint_initialization_validates_model_state() -> None:
+    config = make_config()
+    model = GPT(config)
+    state = model.state_dict()
+
+    with pytest.raises(ValueError, match="missing model_state"):
+        initialize_model(model, config, {"model_config": config.to_dict()})
+    with pytest.raises(ValueError, match="configuration does not match"):
+        initialize_model(
+            model, config,
+            {"model_config": make_config(block_size=9).to_dict(), "model_state": state},
+        )
+    with pytest.raises(ValueError, match="model state is incompatible"):
+        initialize_model(
+            model, config,
+            {
+                "model_config": config.to_dict(),
+                "model_state": {**state, "head.weight": torch.zeros(1)},
+            },
+        )
 
 
 def test_resume_matches_uninterrupted_training(tmp_path: Path) -> None:
