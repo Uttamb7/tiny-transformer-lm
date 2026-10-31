@@ -79,6 +79,14 @@ def main() -> None:
         help="reduce logits for tokens already present in the sequence (must be >= 1)",
     )
     parser.add_argument(
+        "--frequency-penalty", type=float, default=0.0,
+        help="subtract a penalty for every prior occurrence of a token",
+    )
+    parser.add_argument(
+        "--presence-penalty", type=float, default=0.0,
+        help="subtract a penalty once from every token already present",
+    )
+    parser.add_argument(
         "--no-repeat-ngram-size", type=positive_int, default=None,
         help="prevent generation from repeating an n-gram of this size",
     )
@@ -157,6 +165,8 @@ def main() -> None:
             eos_token_id=eos_token_id,
             min_new_tokens=args.min_new_tokens,
             repetition_penalty=args.repetition_penalty,
+            frequency_penalty=args.frequency_penalty,
+            presence_penalty=args.presence_penalty,
             no_repeat_ngram_size=args.no_repeat_ngram_size,
             suppress_token_ids=[
                 tokenizer.special_tokens[token] for token in args.suppress_special

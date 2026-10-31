@@ -96,6 +96,9 @@ python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --gr
 # Keep tokens whose probability is at least 5% of the most likely token
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --min-p 0.05
 
+# Penalize frequently repeated tokens and any token already present
+python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --frequency-penalty 0.2 --presence-penalty 0.1
+
 # Treat a reserved token in the prompt as one learned token instead of ordinary bytes
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "<|endoftext|>ROMEO:" --allowed-special "<|endoftext|>"
 
@@ -126,6 +129,9 @@ and other PyTorch random draws.
 `--greedy` chooses the highest eligible logit at every step; sampling remains the default.
 `--min-p P` removes tokens below `P` times the most likely token's probability for
 each sample, and can be combined with top-k and top-p filtering.
+`--frequency-penalty P` subtracts `P` for every prior occurrence of a token in each
+sample; `--presence-penalty P` subtracts `P` once when a token has appeared at all.
+Both default to zero and include the prompt plus the generated continuation.
 Prompt text uses ordinary byte encoding by default. Repeat `--allowed-special TOKEN`
 to opt specific reserved token names into special-token recognition in the prompt.
 `--no-repeat-ngram-size N` prevents each sample from recreating an exact `N`-token

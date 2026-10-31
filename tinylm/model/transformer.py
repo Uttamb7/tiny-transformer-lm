@@ -143,6 +143,8 @@ class GPT(nn.Module):
         eos_token_id: int | None = None,
         min_new_tokens: int = 0,
         repetition_penalty: float = 1.0,
+        frequency_penalty: float = 0.0,
+        presence_penalty: float = 0.0,
         no_repeat_ngram_size: int | None = None,
         suppress_token_ids: Collection[int] | None = None,
         stop_sequences: Collection[Collection[int]] | None = None,
@@ -195,6 +197,17 @@ class GPT(nn.Module):
             or repetition_penalty < 1
         ):
             raise ValueError("repetition_penalty must be finite and at least 1")
+        for name, penalty in (
+            ("frequency_penalty", frequency_penalty),
+            ("presence_penalty", presence_penalty),
+        ):
+            if (
+                not isinstance(penalty, (int, float))
+                or isinstance(penalty, bool)
+                or not math.isfinite(penalty)
+                or penalty < 0
+            ):
+                raise ValueError(f"{name} must be finite and nonnegative")
         if no_repeat_ngram_size is not None and (
             not isinstance(no_repeat_ngram_size, int)
             or isinstance(no_repeat_ngram_size, bool)
@@ -283,6 +296,12 @@ class GPT(nn.Module):
                     repeated / repetition_penalty,
                 )
                 logits.scatter_(1, idx, repeated)
+
+            if frequency_penalty or presence_penalty:
+                counts = torch.zeros_like(logits)
+                counts.scatter_add_(1, idx, torch.ones_like(idx, dtype=logits.dtype))
+                logits -= frequency_penalty * counts
+                logits -= presence_penalty * (counts > 0)
 
             if suppressed:
                 logits[:, list(suppressed)] = float("-inf")

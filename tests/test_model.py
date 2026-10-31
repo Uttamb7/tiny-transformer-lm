@@ -266,6 +266,51 @@ def test_no_repeat_ngram_blocks_each_rows_repeated_phrase(monkeypatch) -> None:
     assert constrained[:, -1].tolist() == [3, 3]
 
 
+def test_frequency_and_presence_penalties_are_row_specific(monkeypatch) -> None:
+    model = GPT(make_config())
+
+    def forward(idx):
+        logits = torch.full((idx.size(0), 1, model.config.vocab_size), -100.0)
+        logits[:, :, 1], logits[:, :, 2] = 10.0, 9.5
+        return logits, None
+
+    monkeypatch.setattr(model, "forward", forward)
+    frequency = model.generate(
+        torch.tensor([[1, 1, 2], [1, 2, 2]]),
+        max_new_tokens=1, frequency_penalty=1.0, top_k=1, use_cache=False,
+    )
+    presence = model.generate(
+        torch.tensor([[1, 3], [2, 3]]),
+        max_new_tokens=1, presence_penalty=1.0, top_k=1, use_cache=False,
+    )
+
+    assert frequency[:, -1].tolist() == [2, 1]
+    assert presence[:, -1].tolist() == [2, 1]
+
+
+@pytest.mark.parametrize(
+    "option,value",
+    [
+        ("frequency_penalty", -1.0),
+        ("frequency_penalty", float("inf")),
+        ("presence_penalty", float("nan")),
+        ("presence_penalty", True),
+    ],
+)
+def test_generate_rejects_invalid_additive_penalties_before_forward(
+    monkeypatch, option, value
+) -> None:
+    model = GPT(make_config())
+    monkeypatch.setattr(
+        model, "forward", lambda idx: pytest.fail("invalid penalty reached the model")
+    )
+
+    with pytest.raises(ValueError, match=f"{option} must be finite and nonnegative"):
+        model.generate(
+            torch.tensor([[1]]), max_new_tokens=1, use_cache=False, **{option: value}
+        )
+
+
 def test_no_repeat_ngram_reports_exhausted_vocabulary(monkeypatch) -> None:
     model = GPT(make_config(block_size=64))
     monkeypatch.setattr(
@@ -459,12 +504,14 @@ def test_cached_generation_matches_recomputation(use_fused_attn, do_sample) -> N
     torch.manual_seed(42)
     cached = model.generate(
         prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2,
+        frequency_penalty=0.1, presence_penalty=0.2,
         min_p=0.05, no_repeat_ngram_size=2,
         suppress_token_ids=[0, 63], do_sample=do_sample,
     )
     torch.manual_seed(42)
     uncached = model.generate(
         prompt, max_new_tokens=7, top_k=1, repetition_penalty=1.2,
+        frequency_penalty=0.1, presence_penalty=0.2,
         min_p=0.05, no_repeat_ngram_size=2, suppress_token_ids=[0, 63],
         use_cache=False, do_sample=do_sample,
     )

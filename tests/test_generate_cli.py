@@ -68,13 +68,16 @@ def test_generate_cli_requests_greedy_decoding(tmp_path, monkeypatch) -> None:
         [
             "generate.py", "--checkpoint", str(tmp_path / "unused.pt"),
             "--tokenizer", str(tokenizer_path), "--device", "cpu", "--greedy",
-            "--min-p", "0.2",
+            "--min-p", "0.2", "--frequency-penalty", "0.3",
+            "--presence-penalty", "0.4",
         ],
     )
     generate_cli["main"]()
 
     assert captured["do_sample"] is False
     assert captured["min_p"] == 0.2
+    assert captured["frequency_penalty"] == 0.3
+    assert captured["presence_penalty"] == 0.4
 
 
 def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
@@ -147,6 +150,9 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     invalid_penalty = run("--repetition-penalty", "0.5")
     assert invalid_penalty.returncode == 2
     assert "repetition_penalty must be finite and at least 1" in invalid_penalty.stderr
+    invalid_frequency = run("--frequency-penalty", "-0.5")
+    assert invalid_frequency.returncode == 2
+    assert "frequency_penalty must be finite and nonnegative" in invalid_frequency.stderr
     invalid_samples = subprocess.run(
         [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
          "--num-samples", "0"], capture_output=True, text=True, timeout=30,
