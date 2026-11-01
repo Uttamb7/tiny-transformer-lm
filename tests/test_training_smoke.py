@@ -347,6 +347,44 @@ def test_early_stopping_saves_and_does_not_restart(tmp_path: Path) -> None:
     assert resumed_result["stopped_early"] is True
 
 
+def test_early_stopping_min_delta_keeps_true_best_checkpoint(tmp_path: Path) -> None:
+    vocab_size, block_size = 16, 4
+    for name, length in (("train.bin", 200), ("val.bin", 100)):
+        make_synthetic_bin(tmp_path / name, vocab_size, length, block_size)
+    config = GPTConfig(
+        vocab_size=vocab_size, block_size=block_size, n_layer=1,
+        n_head=1, n_embd=8, dropout=0.0,
+    )
+    trainer = Trainer(
+        GPT(config), config,
+        TrainConfig(
+            out_dir=str(tmp_path / "delta"), max_steps=10, warmup_steps=0,
+            batch_size=2, eval_interval=2, eval_iters=1,
+            early_stopping_patience=2, early_stopping_min_delta=0.05,
+            device="cpu",
+        ),
+        TokenDataset(tmp_path / "train.bin", block_size),
+        TokenDataset(tmp_path / "val.bin", block_size),
+    )
+    losses = iter([1.0, 0.98, 0.90, 0.89, 0.88])
+    trainer.estimate_loss = lambda: {"train": 1.0, "val": next(losses)}
+
+    result = trainer.train()
+
+    assert result["completed_step"] == 8
+    last = torch.load(tmp_path / "delta" / "last.pt", map_location="cpu", weights_only=False)
+    best = torch.load(tmp_path / "delta" / "best.pt", map_location="cpu", weights_only=False)
+    assert (last["no_improvement_evals"], last["early_stopping_best_loss"]) == (2, 0.90)
+    assert (best["step"], best["best_val_loss"]) == (8, 0.88)
+    resumed = Trainer(
+        GPT(config), config, trainer.train_config,
+        TokenDataset(tmp_path / "train.bin", block_size),
+        TokenDataset(tmp_path / "val.bin", block_size),
+        resume_checkpoint=last,
+    )
+    assert (resumed.no_improvement_evals, resumed.early_stopping_best_loss) == (2, 0.90)
+
+
 @pytest.mark.parametrize("value", [0, -1, 1.5, True])
 def test_gradient_accumulation_requires_a_positive_integer(value, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="positive integer"):
@@ -357,6 +395,41 @@ def test_gradient_accumulation_requires_a_positive_integer(value, tmp_path: Path
 def test_early_stopping_requires_a_positive_integer(value, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="positive integer"):
         TrainConfig(out_dir=str(tmp_path), early_stopping_patience=value)
+
+
+@pytest.mark.parametrize("value", [-0.1, float("inf"), float("nan"), True])
+def test_early_stopping_min_delta_is_validated(value, tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        TrainConfig(
+            out_dir=str(tmp_path), early_stopping_patience=2,
+            early_stopping_min_delta=value,
+        )
+    if isinstance(value, bool):
+        return
+    result = subprocess.run(
+        [
+            sys.executable, str(Path(__file__).parents[1] / "scripts" / "train.py"),
+            "--config", "missing", "--early-stopping-patience", "2",
+            "--early-stopping-min-delta", str(value),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 2
+    assert "must be finite and nonnegative" in result.stderr
+
+
+def test_early_stopping_min_delta_requires_patience(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="requires early_stopping_patience"):
+        TrainConfig(out_dir=str(tmp_path), early_stopping_min_delta=0.1)
+    result = subprocess.run(
+        [
+            sys.executable, str(Path(__file__).parents[1] / "scripts" / "train.py"),
+            "--config", "missing", "--early-stopping-min-delta", "0.1",
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 2
+    assert "requires --early-stopping-patience" in result.stderr
 
 
 def test_mixed_precision_configuration_is_validated(

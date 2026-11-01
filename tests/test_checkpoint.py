@@ -260,6 +260,7 @@ def test_resume_rejects_incomplete_and_incompatible_checkpoints(tmp_path: Path) 
     legacy_default = {**checkpoint, "train_config": {**checkpoint["train_config"]}}
     del legacy_default["train_config"]["grad_accum_steps"]
     del legacy_default["train_config"]["early_stopping_patience"]
+    del legacy_default["train_config"]["early_stopping_min_delta"]
     del legacy_default["train_config"]["mixed_precision"]
     del legacy_default["train_config"]["mixed_precision_dtype"]
     del legacy_default["train_config"]["gradient_checkpointing"]
@@ -313,6 +314,22 @@ def test_resume_rejects_incomplete_and_incompatible_checkpoints(tmp_path: Path) 
         _make_trainer(
             tmp_path, config, "smoothing-mismatch",
             resume_checkpoint=smoothing_mismatch,
+        )
+
+    missing_delta_baseline = {
+        **checkpoint,
+        "train_config": {
+            **checkpoint["train_config"],
+            "early_stopping_patience": 2,
+            "early_stopping_min_delta": 0.1,
+        },
+    }
+    del missing_delta_baseline["early_stopping_best_loss"]
+    with pytest.raises(ValueError, match="missing early_stopping_best_loss"):
+        _make_trainer(
+            tmp_path, config, "missing-delta-baseline",
+            resume_checkpoint=missing_delta_baseline,
+            early_stopping_patience=2, early_stopping_min_delta=0.1,
         )
 
 

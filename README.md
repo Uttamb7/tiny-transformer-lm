@@ -84,6 +84,9 @@ python scripts/train.py --config tiny --label-smoothing 0.1
 # Stop after four validation checks without a new best loss
 python scripts/train.py --config tiny --early-stopping-patience 4
 
+# Ignore validation-loss changes below 0.01 when resetting that patience
+python scripts/train.py --config tiny --early-stopping-patience 4 --early-stopping-min-delta 0.01
+
 # 3. Generate text from a checkpoint
 python scripts/generate.py --checkpoint runs/tiny/best.pt --prompt "ROMEO:" --max-new-tokens 200
 
@@ -202,6 +205,9 @@ checks fail to improve validation loss. The stopping check is retained in
 The default is disabled. Resume requires the same patience and preserves its count;
 resuming an already stopped run performs no additional optimizer update. Older
 checkpoints use the disabled default.
+`--early-stopping-min-delta` optionally requires a larger validation-loss decrease
+to reset patience, while `best.pt` still tracks every lower loss. It requires
+early-stopping patience, defaults to zero, and is preserved across resume.
 
 `evaluate.py eval` scores every next-token target exactly once in deterministic,
 non-overlapping blocks, resetting context and position indices at each block.

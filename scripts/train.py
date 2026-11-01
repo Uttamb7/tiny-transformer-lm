@@ -61,6 +61,12 @@ def main() -> None:
         default=None,
         help="stop after this many validation checks without improvement",
     )
+    parser.add_argument(
+        "--early-stopping-min-delta",
+        type=float,
+        default=None,
+        help="minimum validation-loss improvement that resets early-stopping patience",
+    )
     args = parser.parse_args()
 
     if args.resume and args.init_from:
@@ -91,6 +97,16 @@ def main() -> None:
         parser.error("--grad-accum-steps must be a positive integer")
     if args.early_stopping_patience is not None and args.early_stopping_patience < 1:
         parser.error("--early-stopping-patience must be a positive integer")
+    if args.early_stopping_min_delta is not None and (
+        not math.isfinite(args.early_stopping_min_delta)
+        or args.early_stopping_min_delta < 0
+    ):
+        parser.error("--early-stopping-min-delta must be finite and nonnegative")
+    if (
+        args.early_stopping_min_delta is not None
+        and args.early_stopping_patience is None
+    ):
+        parser.error("--early-stopping-min-delta requires --early-stopping-patience")
     if args.label_smoothing is not None and (
         not math.isfinite(args.label_smoothing) or not 0 <= args.label_smoothing < 1
     ):
@@ -119,6 +135,8 @@ def main() -> None:
         train_options["grad_accum_steps"] = args.grad_accum_steps
     if args.early_stopping_patience is not None:
         train_options["early_stopping_patience"] = args.early_stopping_patience
+    if args.early_stopping_min_delta is not None:
+        train_options["early_stopping_min_delta"] = args.early_stopping_min_delta
     if args.mixed_precision:
         train_options["mixed_precision"] = True
     if args.mixed_precision_dtype is not None:

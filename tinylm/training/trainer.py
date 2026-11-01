@@ -42,6 +42,7 @@ class TrainConfig:
     eval_interval: int = 200
     eval_iters: int = 50
     early_stopping_patience: int | None = None
+    early_stopping_min_delta: float = 0.0
     mixed_precision: bool = False
     mixed_precision_dtype: str = "float16"
     gradient_checkpointing: bool = False
@@ -63,6 +64,15 @@ class TrainConfig:
             or self.early_stopping_patience < 1
         ):
             raise ValueError("early_stopping_patience must be a positive integer")
+        if (
+            not isinstance(self.early_stopping_min_delta, (int, float))
+            or isinstance(self.early_stopping_min_delta, bool)
+            or not math.isfinite(self.early_stopping_min_delta)
+            or self.early_stopping_min_delta < 0
+        ):
+            raise ValueError("early_stopping_min_delta must be finite and nonnegative")
+        if self.early_stopping_min_delta and self.early_stopping_patience is None:
+            raise ValueError("early_stopping_min_delta requires early_stopping_patience")
         if not isinstance(self.mixed_precision, bool):
             raise ValueError("mixed_precision must be a boolean")
         if self.mixed_precision_dtype not in {"float16", "bfloat16"}:
@@ -116,6 +126,7 @@ class Trainer:
         self.metrics: list[dict] = []
         self.resume_step = 0
         self.best_val_loss = float("inf")
+        self.early_stopping_best_loss = float("inf")
         self.elapsed_seconds = 0.0
         self.no_improvement_evals = 0
         self.stopped_early = False
@@ -143,6 +154,7 @@ class Trainer:
         checkpoint_train_config = {**checkpoint["train_config"]}
         checkpoint_train_config.setdefault("grad_accum_steps", 1)
         checkpoint_train_config.setdefault("early_stopping_patience", None)
+        checkpoint_train_config.setdefault("early_stopping_min_delta", 0.0)
         checkpoint_train_config.setdefault("mixed_precision", False)
         checkpoint_train_config.setdefault("mixed_precision_dtype", "float16")
         checkpoint_train_config.setdefault("gradient_checkpointing", False)
@@ -179,6 +191,16 @@ class Trainer:
             torch.cuda.set_rng_state_all([state.cpu() for state in cuda_state])
         self.resume_step = step
         self.best_val_loss = float(checkpoint["best_val_loss"])
+        if (
+            self.train_config.early_stopping_min_delta
+            and "early_stopping_best_loss" not in checkpoint
+        ):
+            raise ValueError(
+                "checkpoint cannot be resumed; missing early_stopping_best_loss"
+            )
+        self.early_stopping_best_loss = float(
+            checkpoint.get("early_stopping_best_loss", checkpoint["best_val_loss"])
+        )
         self.elapsed_seconds = float(checkpoint["elapsed_seconds"])
         self.no_improvement_evals = int(checkpoint.get("no_improvement_evals", 0))
         self.stopped_early = bool(checkpoint.get("stopped_early", False))
@@ -244,6 +266,7 @@ class Trainer:
             "step": step,
             "val_loss": val_loss,
             "best_val_loss": best_val_loss,
+            "early_stopping_best_loss": self.early_stopping_best_loss,
             "elapsed_seconds": elapsed_seconds,
             "no_improvement_evals": self.no_improvement_evals,
             "stopped_early": self.stopped_early,
@@ -269,6 +292,7 @@ class Trainer:
         metrics_path = out_dir / "metrics.jsonl"
 
         best_val_loss = self.best_val_loss
+        early_stopping_best_loss = self.early_stopping_best_loss
         if self.resumed:
             if not metrics_path.exists():
                 raise ValueError("cannot resume without the existing metrics.jsonl")
@@ -318,14 +342,22 @@ class Trainer:
                 with metrics_path.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(record) + "\n")
 
-                if losses["val"] < best_val_loss:
+                is_best = losses["val"] < best_val_loss
+                if is_best:
                     best_val_loss = losses["val"]
+                if (
+                    losses["val"]
+                    < early_stopping_best_loss - cfg.early_stopping_min_delta
+                ):
+                    early_stopping_best_loss = losses["val"]
+                    self.early_stopping_best_loss = early_stopping_best_loss
                     self.no_improvement_evals = 0
+                else:
+                    self.no_improvement_evals += 1
+                if is_best:
                     self.save_checkpoint(
                         out_dir / "best.pt", step, losses["val"], best_val_loss, elapsed
                     )
-                else:
-                    self.no_improvement_evals += 1
                 self.stopped_early = (
                     cfg.early_stopping_patience is not None
                     and self.no_improvement_evals >= cfg.early_stopping_patience
@@ -356,6 +388,7 @@ class Trainer:
             self.scaler.update()
 
         self.best_val_loss = best_val_loss
+        self.early_stopping_best_loss = early_stopping_best_loss
         self.elapsed_seconds += time.time() - t0
         return {
             "best_val_loss": best_val_loss,
