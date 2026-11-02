@@ -21,10 +21,20 @@ def main() -> None:
         default=None,
         help="One or more local text documents. If omitted, downloads TinyShakespeare.",
     )
+    parser.add_argument(
+        "--val-input-file",
+        type=Path,
+        nargs="+",
+        default=None,
+        help="Dedicated validation documents (requires --input-file).",
+    )
     parser.add_argument("--out-dir", type=Path, default=REPO_ROOT / "data_raw" / "tinyshakespeare")
     parser.add_argument("--vocab-size", type=int, default=512)
     parser.add_argument("--val-fraction", type=float, default=0.1)
     args = parser.parse_args()
+
+    if args.val_input_file is not None and args.input_file is None:
+        parser.error("--val-input-file requires --input-file")
 
     if args.input_file is None:
         raw_path = download_tinyshakespeare(REPO_ROOT / "data_raw" / "tinyshakespeare_raw.txt")
@@ -37,6 +47,7 @@ def main() -> None:
         out_dir=args.out_dir,
         vocab_size=args.vocab_size,
         val_fraction=args.val_fraction,
+        validation_text_path=args.val_input_file,
     )
     print(f"wrote dataset to {args.out_dir}")
     print(meta)

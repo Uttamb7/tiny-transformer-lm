@@ -57,6 +57,9 @@ python scripts/prepare_data.py --vocab-size 512
 # Or prepare multiple local documents with a real end token between each file
 python scripts/prepare_data.py --input-file corpus/chapter1.txt corpus/chapter2.txt --out-dir data_raw/books
 
+# Keep dedicated validation documents out of tokenizer training and the training split
+python scripts/prepare_data.py --input-file corpus/train/*.txt --val-input-file corpus/validation/*.txt --out-dir data_raw/books
+
 # 2. Train a model (nano / tiny / small)
 python scripts/train.py --config tiny
 
@@ -154,6 +157,10 @@ document-boundary tokens, so stopping does not teach those checkpoints when to e
 `<|endoftext|>` token between local files, allowing newly trained models to learn
 document endings. A single file retains the original continuous-corpus behavior,
 and `meta.json` records the document count.
+Pass `--val-input-file FILE [FILE ...]` with local training files to learn tokenizer
+merges from training documents only and encode a separate validation corpus. Document
+separators are inserted independently inside each split, and `meta.json` records both
+document counts. Without this option, the existing fractional token split is unchanged.
 Generation reuses each layer's attention keys and values while the active context
 fits within `block_size`. When the context window slides, it recomputes the cropped
 window so learned positional embeddings keep exactly the same behavior as uncached
