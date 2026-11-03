@@ -25,6 +25,54 @@ def test_prepare_dataset_preserves_single_document_encoding(tmp_path: Path) -> N
     tokenizer = ByteLevelBPETokenizer.load(out_dir / "tokenizer.json")
     assert written_ids(out_dir) == tokenizer.encode(source.read_text(encoding="utf-8"))
     assert meta["document_count"] == 1
+    assert meta["min_frequency"] == 2
+
+
+def test_prepare_dataset_configures_merge_frequency(tmp_path: Path) -> None:
+    source = tmp_path / "pairs.txt"
+    source.write_text("ab" * 600, encoding="utf-8")
+    low_dir, high_dir = tmp_path / "low", tmp_path / "high"
+
+    prepare_dataset(source, low_dir, vocab_size=257, min_frequency=2)
+    high_meta = prepare_dataset(source, high_dir, vocab_size=257, min_frequency=1000)
+
+    assert ByteLevelBPETokenizer.load(low_dir / "tokenizer.json").merges
+    assert not ByteLevelBPETokenizer.load(high_dir / "tokenizer.json").merges
+    assert high_meta["min_frequency"] == 1000
+
+
+def test_prepare_cli_validates_merge_frequency(tmp_path: Path) -> None:
+    source = tmp_path / "pairs.txt"
+    source.write_text("ab" * 600, encoding="utf-8")
+    out_dir = tmp_path / "configured"
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve().parents[1] / "scripts" / "prepare_data.py"),
+        "--input-file", str(source), "--out-dir", str(out_dir),
+        "--vocab-size", "257", "--min-frequency", "1000",
+    ]
+
+    run = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+    assert not ByteLevelBPETokenizer.load(out_dir / "tokenizer.json").merges
+    assert json.loads((out_dir / "meta.json").read_text(encoding="utf-8"))[
+        "min_frequency"
+    ] == 1000
+
+    invalid = subprocess.run(
+        command[:-1] + ["0"], capture_output=True, text=True, timeout=30
+    )
+    assert invalid.returncode == 2
+    assert "--min-frequency must be a positive integer" in invalid.stderr
+
+
+@pytest.mark.parametrize("min_frequency", [0, -1, 1.5, True])
+def test_prepare_dataset_rejects_invalid_merge_frequency(
+    tmp_path: Path, min_frequency
+) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        prepare_dataset([], tmp_path / "invalid", min_frequency=min_frequency)
+    assert not (tmp_path / "invalid").exists()
 
 
 def test_prepare_cli_inserts_real_document_boundaries(tmp_path: Path) -> None:

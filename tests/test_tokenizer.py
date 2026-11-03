@@ -64,6 +64,14 @@ def test_train_rejects_vocab_size_below_256() -> None:
         ByteLevelBPETokenizer.train("hello", vocab_size=100)
 
 
+@pytest.mark.parametrize("min_frequency", [0, -1, 1.5, True])
+def test_train_rejects_invalid_min_frequency(min_frequency) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        ByteLevelBPETokenizer.train(
+            "ordinary text", vocab_size=256, min_frequency=min_frequency
+        )
+
+
 @pytest.mark.parametrize(
     "special_tokens,message",
     [(("",), "non-empty strings"), (("<same>", "<same>"), "unique"), ((1,), "non-empty strings")],

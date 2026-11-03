@@ -29,9 +29,16 @@ def prepare_dataset(
     vocab_size: int = 512,
     val_fraction: float = 0.1,
     validation_text_path: Path | Sequence[Path] | None = None,
+    min_frequency: int = 2,
 ) -> dict:
     if not 0.0 < val_fraction < 1.0:
         raise ValueError("val_fraction must be between 0 and 1")
+    if (
+        not isinstance(min_frequency, int)
+        or isinstance(min_frequency, bool)
+        or min_frequency < 1
+    ):
+        raise ValueError("min_frequency must be a positive integer")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = [raw_text_path] if isinstance(raw_text_path, Path) else list(raw_text_path)
@@ -56,7 +63,9 @@ def prepare_dataset(
         if not sum(map(len, validation_documents)):
             raise ValueError("validation corpus is empty")
 
-    tokenizer = ByteLevelBPETokenizer.train(documents, vocab_size=vocab_size, verbose=True)
+    tokenizer = ByteLevelBPETokenizer.train(
+        documents, vocab_size=vocab_size, min_frequency=min_frequency, verbose=True
+    )
     tokenizer.save(out_dir / "tokenizer.json")
 
     def encode(source_documents: list[str]) -> np.ndarray:
@@ -85,6 +94,7 @@ def prepare_dataset(
         "val_tokens": int(len(val_ids)),
         "source_chars": training_chars + sum(map(len, validation_documents or [])),
         "document_count": len(documents) + len(validation_documents or []),
+        "min_frequency": min_frequency,
         "compression_ratio_chars_per_token": round(
             (training_chars + sum(map(len, validation_documents or [])))
             / (len(train_ids) + len(val_ids)),

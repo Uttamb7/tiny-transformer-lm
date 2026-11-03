@@ -60,6 +60,9 @@ python scripts/prepare_data.py --input-file corpus/chapter1.txt corpus/chapter2.
 # Keep dedicated validation documents out of tokenizer training and the training split
 python scripts/prepare_data.py --input-file corpus/train/*.txt --val-input-file corpus/validation/*.txt --out-dir data_raw/books
 
+# Require a pair to appear at least five times before learning its BPE merge
+python scripts/prepare_data.py --input-file corpus/*.txt --min-frequency 5 --out-dir data_raw/books
+
 # 2. Train a model (nano / tiny / small)
 python scripts/train.py --config tiny
 
@@ -161,6 +164,9 @@ Pass `--val-input-file FILE [FILE ...]` with local training files to learn token
 merges from training documents only and encode a separate validation corpus. Document
 separators are inserted independently inside each split, and `meta.json` records both
 document counts. Without this option, the existing fractional token split is unchanged.
+`--min-frequency N` controls the least frequent byte pair eligible for a learned BPE
+merge. Its default of 2 preserves current behavior; higher values can reduce rare merges,
+and the selected value is recorded in `meta.json`.
 Generation reuses each layer's attention keys and values while the active context
 fits within `block_size`. When the context window slides, it recomputes the cropped
 window so learned positional embeddings keep exactly the same behavior as uncached

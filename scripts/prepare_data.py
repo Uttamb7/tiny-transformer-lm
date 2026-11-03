@@ -30,11 +30,17 @@ def main() -> None:
     )
     parser.add_argument("--out-dir", type=Path, default=REPO_ROOT / "data_raw" / "tinyshakespeare")
     parser.add_argument("--vocab-size", type=int, default=512)
+    parser.add_argument(
+        "--min-frequency", type=int, default=2,
+        help="minimum corpus frequency required to learn a BPE merge (default: 2)",
+    )
     parser.add_argument("--val-fraction", type=float, default=0.1)
     args = parser.parse_args()
 
     if args.val_input_file is not None and args.input_file is None:
         parser.error("--val-input-file requires --input-file")
+    if args.min_frequency < 1:
+        parser.error("--min-frequency must be a positive integer")
 
     if args.input_file is None:
         raw_path = download_tinyshakespeare(REPO_ROOT / "data_raw" / "tinyshakespeare_raw.txt")
@@ -48,6 +54,7 @@ def main() -> None:
         vocab_size=args.vocab_size,
         val_fraction=args.val_fraction,
         validation_text_path=args.val_input_file,
+        min_frequency=args.min_frequency,
     )
     print(f"wrote dataset to {args.out_dir}")
     print(meta)
