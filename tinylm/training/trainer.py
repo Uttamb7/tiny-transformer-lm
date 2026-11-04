@@ -383,7 +383,9 @@ class Trainer:
                     )
                 self.scaler.scale(loss / cfg.grad_accum_steps).backward()
             self.scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), cfg.grad_clip)
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), cfg.grad_clip, error_if_nonfinite=True
+            )
             self.scaler.step(self.optimizer)
             self.scaler.update()
 

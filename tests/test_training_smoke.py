@@ -97,6 +97,38 @@ def test_diverging_loss_raises_clear_error(tmp_path: Path) -> None:
         trainer.train()
 
 
+def test_nonfinite_gradients_fail_before_optimizer_update(tmp_path: Path) -> None:
+    for name in ("train.bin", "val.bin"):
+        make_synthetic_bin(tmp_path / name, 16, 100, 4)
+    config = GPTConfig(
+        vocab_size=16, block_size=4, n_layer=1, n_head=1, n_embd=8, dropout=0.0
+    )
+    model = GPT(config)
+    before = {name: value.clone() for name, value in model.state_dict().items()}
+    model.token_emb.weight.register_hook(
+        lambda gradient: torch.full_like(gradient, float("nan"))
+    )
+    trainer = Trainer(
+        model,
+        config,
+        TrainConfig(
+            out_dir=str(tmp_path / "nonfinite"), max_steps=1, warmup_steps=0,
+            batch_size=2, eval_iters=1, device="cpu",
+        ),
+        TokenDataset(tmp_path / "train.bin", 4),
+        TokenDataset(tmp_path / "val.bin", 4),
+    )
+    trainer.estimate_loss = lambda: {"train": 1.0, "val": 1.0}
+    trainer.save_checkpoint = lambda *args, **kwargs: None
+    trainer.optimizer.step = lambda: pytest.fail("optimizer stepped with invalid gradients")
+
+    with pytest.raises(RuntimeError, match="non-finite"):
+        trainer.train()
+
+    for name, expected in before.items():
+        assert torch.equal(model.state_dict()[name], expected), name
+
+
 def test_loss_estimation_is_repeatable_without_advancing_training_samples(
     tmp_path: Path,
 ) -> None:
