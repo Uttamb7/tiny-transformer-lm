@@ -27,6 +27,10 @@ def main() -> None:
     parser.add_argument("--run-name", type=str, default=None)
     parser.add_argument("--resume", type=Path, default=None, help="resume an interrupted run")
     parser.add_argument(
+        "--extend-to-step", type=int,
+        help="resume through this new target step and persist the extended schedule",
+    )
+    parser.add_argument(
         "--init-from", type=Path, default=None,
         help="initialize a new named run from compatible checkpoint weights",
     )
@@ -71,6 +75,10 @@ def main() -> None:
 
     if args.resume and args.init_from:
         parser.error("--resume and --init-from are mutually exclusive")
+    if args.extend_to_step is not None and args.resume is None:
+        parser.error("--extend-to-step requires --resume")
+    if args.extend_to_step is not None and args.extend_to_step < 1:
+        parser.error("--extend-to-step must be a positive integer")
     if args.init_from and not args.run_name:
         parser.error("--init-from requires --run-name")
     initial_run_dir = REPO_ROOT / "runs" / args.run_name if args.init_from else None
@@ -123,6 +131,14 @@ def main() -> None:
         if args.resume
         else None
     )
+    if args.extend_to_step is not None:
+        checkpoint_step = (
+            resume_checkpoint.get("step") if isinstance(resume_checkpoint, dict) else None
+        )
+        if not isinstance(checkpoint_step, int):
+            parser.error("resume checkpoint step is invalid")
+        if args.extend_to_step <= checkpoint_step:
+            parser.error("--extend-to-step must exceed the checkpoint step")
     initial_checkpoint = (
         torch.load(args.init_from, map_location=args.device, weights_only=False)
         if args.init_from
@@ -131,6 +147,14 @@ def main() -> None:
     if args.resume and args.run_name:
         parser.error("--run-name cannot be used with --resume")
     train_options = {**raw_config["train"]}
+    if isinstance(resume_checkpoint, dict) and isinstance(
+        resume_checkpoint.get("train_config"), dict
+    ):
+        train_options["max_steps"] = resume_checkpoint["train_config"].get(
+            "max_steps", train_options.get("max_steps")
+        )
+    if args.extend_to_step is not None:
+        train_options["max_steps"] = args.extend_to_step
     if args.grad_accum_steps is not None:
         train_options["grad_accum_steps"] = args.grad_accum_steps
     if args.early_stopping_patience is not None:
@@ -176,6 +200,7 @@ def main() -> None:
             train_data,
             val_data,
             resume_checkpoint=resume_checkpoint,
+            allow_max_steps_change=args.extend_to_step is not None,
         )
     except ValueError as error:
         parser.error(str(error))

@@ -109,6 +109,7 @@ class Trainer:
         train_data: TokenDataset,
         val_data: TokenDataset,
         resume_checkpoint: dict | None = None,
+        allow_max_steps_change: bool = False,
     ) -> None:
         self.model = model.to(train_config.device)
         self.model.gradient_checkpointing = train_config.gradient_checkpointing
@@ -132,7 +133,7 @@ class Trainer:
         self.stopped_early = False
         self.resumed = False
         if resume_checkpoint is not None:
-            self.restore_checkpoint(resume_checkpoint)
+            self.restore_checkpoint(resume_checkpoint, allow_max_steps_change)
 
     def _resume_config(self) -> dict:
         config = asdict(self.train_config)
@@ -140,7 +141,9 @@ class Trainer:
         del config["device"]
         return config
 
-    def restore_checkpoint(self, checkpoint: dict) -> None:
+    def restore_checkpoint(
+        self, checkpoint: dict, allow_max_steps_change: bool = False
+    ) -> None:
         required = {
             "model_state", "optimizer_state", "model_config", "train_config", "step",
             "best_val_loss", "torch_rng_state", "trainer_rng_state", "device_type",
@@ -151,6 +154,14 @@ class Trainer:
             raise ValueError("checkpoint cannot be resumed; missing " + ", ".join(missing))
         if checkpoint["model_config"] != self.model_config.to_dict():
             raise ValueError("checkpoint model configuration does not match the requested config")
+        step = checkpoint["step"]
+        if not isinstance(step, int) or step < 0:
+            raise ValueError("checkpoint step is invalid")
+        if allow_max_steps_change:
+            if self.train_config.max_steps <= step:
+                raise ValueError("extended max_steps must exceed the checkpoint step")
+        elif step > self.train_config.max_steps:
+            raise ValueError("checkpoint step is outside the requested training schedule")
         checkpoint_train_config = {**checkpoint["train_config"]}
         checkpoint_train_config.setdefault("grad_accum_steps", 1)
         checkpoint_train_config.setdefault("early_stopping_patience", None)
@@ -159,6 +170,8 @@ class Trainer:
         checkpoint_train_config.setdefault("mixed_precision_dtype", "float16")
         checkpoint_train_config.setdefault("gradient_checkpointing", False)
         checkpoint_train_config.setdefault("label_smoothing", 0.0)
+        if allow_max_steps_change:
+            checkpoint_train_config["max_steps"] = self.train_config.max_steps
         if checkpoint_train_config != self._resume_config():
             raise ValueError(
                 "checkpoint training configuration does not match the requested config"
@@ -176,10 +189,6 @@ class Trainer:
             if "grad_scaler_state" not in checkpoint:
                 raise ValueError("checkpoint cannot be resumed; missing grad_scaler_state")
             self.scaler.load_state_dict(checkpoint["grad_scaler_state"])
-        step = checkpoint["step"]
-        if not isinstance(step, int) or step < 0 or step > self.train_config.max_steps:
-            raise ValueError("checkpoint step is outside the requested training schedule")
-
         self.model.load_state_dict(checkpoint["model_state"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state"])
         torch.set_rng_state(checkpoint["torch_rng_state"].cpu())

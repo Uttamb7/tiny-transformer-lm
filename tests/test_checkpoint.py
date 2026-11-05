@@ -21,6 +21,7 @@ def _make_trainer(
     run_name: str = "run",
     resume_checkpoint: dict | None = None,
     model: GPT | None = None,
+    allow_max_steps_change: bool = False,
     **train_overrides,
 ) -> Trainer:
     import numpy as np
@@ -45,6 +46,7 @@ def _make_trainer(
         train_data,
         val_data,
         resume_checkpoint=resume_checkpoint,
+        allow_max_steps_change=allow_max_steps_change,
     )
 
 
@@ -235,6 +237,71 @@ def test_resume_matches_uninterrupted_training(tmp_path: Path) -> None:
             assert torch.equal(
                 resumed_checkpoint["optimizer_state"]["state"][parameter][name], expected
             )
+
+
+def test_resume_can_extend_and_persist_the_training_schedule(tmp_path: Path) -> None:
+    config = make_config()
+    options = {
+        "max_steps": 2,
+        "warmup_steps": 0,
+        "eval_interval": 2,
+        "eval_iters": 1,
+        "seed": 7,
+    }
+    trainer = _make_trainer(tmp_path, config, "extended", **options)
+    trainer.train()
+    checkpoint = torch.load(
+        tmp_path / "extended" / "last.pt", map_location="cpu", weights_only=False
+    )
+
+    extended = _make_trainer(
+        tmp_path,
+        config,
+        "extended",
+        resume_checkpoint=checkpoint,
+        allow_max_steps_change=True,
+        **{**options, "max_steps": 4},
+    )
+    result = extended.train()
+    saved = torch.load(
+        tmp_path / "extended" / "last.pt", map_location="cpu", weights_only=False
+    )
+
+    assert result["completed_step"] == 4
+    assert saved["train_config"]["max_steps"] == 4
+    assert [
+        record["step"]
+        for record in map(
+            json.loads,
+            (tmp_path / "extended" / "metrics.jsonl").read_text().splitlines(),
+        )
+    ] == [0, 2, 4]
+    _make_trainer(
+        tmp_path,
+        config,
+        "extended",
+        resume_checkpoint=saved,
+        **{**options, "max_steps": 4},
+    )
+
+    with pytest.raises(ValueError, match="must exceed the checkpoint step"):
+        _make_trainer(
+            tmp_path,
+            config,
+            "extended",
+            resume_checkpoint=checkpoint,
+            allow_max_steps_change=True,
+            **options,
+        )
+    with pytest.raises(ValueError, match="training configuration"):
+        _make_trainer(
+            tmp_path,
+            config,
+            "extended",
+            resume_checkpoint=checkpoint,
+            allow_max_steps_change=True,
+            **{**options, "max_steps": 4, "max_lr": 9e-4},
+        )
 
 
 def test_resume_rejects_incomplete_and_incompatible_checkpoints(tmp_path: Path) -> None:

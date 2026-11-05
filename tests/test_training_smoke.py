@@ -550,6 +550,8 @@ def test_checkpoint_initialization_cli_boundaries(tmp_path: Path) -> None:
                 ["--init-from", "best.pt", "--run-name", existing_run.name],
                 "output run already exists",
             ),
+            (["--extend-to-step", "10"], "requires --resume"),
+            (["--resume", "missing.pt", "--extend-to-step", "0"], "positive integer"),
         ]:
             result = subprocess.run(
                 [sys.executable, script, "--config", "missing", *arguments],
@@ -557,6 +559,29 @@ def test_checkpoint_initialization_cli_boundaries(tmp_path: Path) -> None:
             )
             assert result.returncode == 2
             assert message in result.stderr
+
+        checkpoint = tmp_path / "last.pt"
+        torch.save({"step": 5}, checkpoint)
+        (tmp_path / "meta.json").write_text('{"vocab_size": 32}', encoding="utf-8")
+        too_short = subprocess.run(
+            [
+                sys.executable,
+                script,
+                "--config",
+                "nano",
+                "--data-dir",
+                str(tmp_path),
+                "--resume",
+                str(checkpoint),
+                "--extend-to-step",
+                "5",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert too_short.returncode == 2
+        assert "must exceed the checkpoint step" in too_short.stderr
     finally:
         existing_run.rmdir()
 

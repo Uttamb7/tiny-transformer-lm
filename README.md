@@ -69,6 +69,9 @@ python scripts/train.py --config tiny
 # Resume an interrupted run from its latest checkpoint
 python scripts/train.py --config tiny --resume runs/tiny/last.pt
 
+# Continue a checkpoint through a larger explicit training budget
+python scripts/train.py --config tiny --resume runs/tiny/last.pt --extend-to-step 5000
+
 # Initialize a separate run from compatible checkpoint model weights
 python scripts/train.py --config tiny --init-from runs/tiny/best.pt --run-name tiny-finetune
 
@@ -179,6 +182,10 @@ and appends to its existing `metrics.jsonl`; that log must end at the checkpoint
 step. Use the same config, device type, and `--use-fused-attn` setting. Older
 checkpoints without resume metadata fail clearly and remain usable for generation
 and evaluation.
+
+`--extend-to-step N` resumes past the checkpoint step using `N` as the new schedule
+target and records it in later checkpoints. All other training settings remain strict;
+changing the target also changes the remaining warmup/cosine learning-rate schedule.
 
 `--init-from` starts a new named run from checkpoint model weights only. The model
 configuration and prepared-data vocabulary must match exactly; optimizer, scaler,
