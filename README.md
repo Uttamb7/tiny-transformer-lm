@@ -183,6 +183,12 @@ step. Use the same config, device type, and `--use-fused-attn` setting. Older
 checkpoints without resume metadata fail clearly and remain usable for generation
 and evaluation.
 
+Newly prepared datasets record the SHA-256 fingerprint of their exact
+`tokenizer.json`, and checkpoints preserve that identity. Training, resume,
+checkpoint initialization, and generation reject a different tokenizer even when
+its vocabulary has the same size. Legacy prepared data and checkpoints without a
+fingerprint retain the existing vocabulary-size compatibility check.
+
 `--extend-to-step N` resumes past the checkpoint step using `N` as the new schedule
 target and records it in later checkpoints. All other training settings remain strict;
 changing the target also changes the remaining warmup/cosine learning-rate schedule.

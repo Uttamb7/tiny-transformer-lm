@@ -10,6 +10,7 @@ exactly, even if it contains characters never seen during training.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import Counter
@@ -32,6 +33,10 @@ PRETOKENIZE_PATTERN = (
 )
 
 NUM_BASE_BYTES = 256
+
+
+def tokenizer_sha256(path: str | Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def _merge_pair(ids: list[int], pair: tuple[int, int], new_id: int) -> list[int]:

@@ -6,7 +6,7 @@ from runpy import run_path
 import torch
 
 from tinylm.model import GPT, GPTConfig
-from tinylm.tokenizer import ByteLevelBPETokenizer
+from tinylm.tokenizer import ByteLevelBPETokenizer, tokenizer_sha256
 
 generate_cli = run_path(
     str(Path(__file__).resolve().parents[1] / "scripts" / "generate.py")
@@ -97,7 +97,8 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
         model.token_emb.weight[ord("x")].fill_(0.5)
     checkpoint_path = tmp_path / "synthetic.pt"
     torch.save({"model_config": config.to_dict(), "model_state": model.state_dict(),
-                "step": 0, "val_loss": 0.0}, checkpoint_path)
+                "step": 0, "val_loss": 0.0,
+                "tokenizer_sha256": tokenizer_sha256(tokenizer_path)}, checkpoint_path)
     command = [sys.executable, str(Path(__file__).resolve().parents[1] / "scripts/generate.py"),
                "--checkpoint", str(checkpoint_path), "--tokenizer", str(tokenizer_path),
                "--device", "cpu", "--prompt", "Hi", "--max-new-tokens", "3", "--top-k", "1"]
@@ -193,6 +194,25 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     assert mismatch.returncode == 2
     assert "tokenizer vocabulary size 258" in mismatch.stderr
     assert "checkpoint vocabulary size 257" in mismatch.stderr
+    same_size_tokenizer = ByteLevelBPETokenizer.train(
+        "", vocab_size=256, special_tokens=("<different>",)
+    )
+    same_size_path = tmp_path / "same-size-tokenizer.json"
+    same_size_tokenizer.save(same_size_path)
+    fingerprint_mismatch = run("--tokenizer", str(same_size_path))
+    assert fingerprint_mismatch.returncode == 2
+    assert "does not match checkpoint fingerprint" in fingerprint_mismatch.stderr
+
+    legacy_checkpoint = tmp_path / "legacy.pt"
+    torch.save({"model_config": config.to_dict(), "model_state": model.state_dict(),
+                "step": 0, "val_loss": 0.0}, legacy_checkpoint)
+    legacy_command = command.copy()
+    legacy_command[legacy_command.index(str(checkpoint_path))] = str(legacy_checkpoint)
+    legacy = subprocess.run(
+        legacy_command + ["--tokenizer", str(same_size_path)],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert legacy.returncode == 0, legacy.stderr
     missing_eos = run("--min-new-tokens", "1")
     assert missing_eos.returncode == 2
     assert "requires --eos-token" in missing_eos.stderr

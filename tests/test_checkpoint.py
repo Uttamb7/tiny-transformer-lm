@@ -21,6 +21,7 @@ def _make_trainer(
     run_name: str = "run",
     resume_checkpoint: dict | None = None,
     model: GPT | None = None,
+    tokenizer_sha256: str | None = None,
     allow_max_steps_change: bool = False,
     **train_overrides,
 ) -> Trainer:
@@ -45,6 +46,7 @@ def _make_trainer(
         train_config,
         train_data,
         val_data,
+        tokenizer_sha256=tokenizer_sha256,
         resume_checkpoint=resume_checkpoint,
         allow_max_steps_change=allow_max_steps_change,
     )
@@ -74,6 +76,26 @@ def test_checkpoint_round_trip_preserves_weights_and_outputs(tmp_path: Path) -> 
         logits_b, _ = restored_model(x)
     assert torch.equal(logits_a, logits_b)
     assert list(tmp_path.glob(".ckpt.pt.*.tmp")) == []
+
+
+def test_checkpoint_binds_resume_and_initialization_to_tokenizer(tmp_path: Path) -> None:
+    config = make_config()
+    trainer = _make_trainer(tmp_path, config, tokenizer_sha256="a" * 64)
+    path = tmp_path / "bound.pt"
+    trainer.save_checkpoint(path, step=1, val_loss=2.0, best_val_loss=2.0)
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+
+    assert checkpoint["tokenizer_sha256"] == "a" * 64
+    with pytest.raises(ValueError, match="tokenizer does not match"):
+        _make_trainer(
+            tmp_path, config, "wrong-tokenizer", tokenizer_sha256="b" * 64,
+            resume_checkpoint=checkpoint,
+        )
+    with pytest.raises(ValueError, match="tokenizer does not match"):
+        initialize_model(GPT(config), config, checkpoint, "b" * 64)
+
+    legacy = {key: value for key, value in checkpoint.items() if key != "tokenizer_sha256"}
+    initialize_model(GPT(config), config, legacy, "b" * 64)
 
 
 def test_failed_checkpoint_save_preserves_previous_file(

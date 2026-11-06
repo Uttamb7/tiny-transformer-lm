@@ -7,7 +7,7 @@ from urllib.request import urlopen
 
 import numpy as np
 
-from tinylm.tokenizer import ByteLevelBPETokenizer
+from tinylm.tokenizer import ByteLevelBPETokenizer, tokenizer_sha256
 
 TINYSHAKESPEARE_URL = (
     "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
@@ -66,7 +66,8 @@ def prepare_dataset(
     tokenizer = ByteLevelBPETokenizer.train(
         documents, vocab_size=vocab_size, min_frequency=min_frequency, verbose=True
     )
-    tokenizer.save(out_dir / "tokenizer.json")
+    tokenizer_path = out_dir / "tokenizer.json"
+    tokenizer.save(tokenizer_path)
 
     def encode(source_documents: list[str]) -> np.ndarray:
         ids = (
@@ -90,6 +91,7 @@ def prepare_dataset(
 
     meta: dict[str, object] = {
         "vocab_size": tokenizer.vocab_size,
+        "tokenizer_sha256": tokenizer_sha256(tokenizer_path),
         "train_tokens": int(len(train_ids)),
         "val_tokens": int(len(val_ids)),
         "source_chars": training_chars + sum(map(len, validation_documents or [])),

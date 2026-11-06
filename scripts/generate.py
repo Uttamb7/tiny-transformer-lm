@@ -13,7 +13,7 @@ from pathlib import Path
 import torch
 
 from tinylm.model import GPT, GPTConfig
-from tinylm.tokenizer import ByteLevelBPETokenizer
+from tinylm.tokenizer import ByteLevelBPETokenizer, tokenizer_sha256
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -142,6 +142,11 @@ def main() -> None:
             f"{tokenizer.vocab_size} does not match checkpoint vocabulary size "
             f"{model.config.vocab_size}"
         )
+    if (
+        ckpt.get("tokenizer_sha256") is not None
+        and ckpt["tokenizer_sha256"] != tokenizer_sha256(args.tokenizer)
+    ):
+        parser.error("tokenizer does not match checkpoint fingerprint")
     generator = (
         torch.Generator(device=torch.device(args.device)).manual_seed(args.seed)
         if args.seed is not None

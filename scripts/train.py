@@ -13,6 +13,7 @@ import torch
 
 from tinylm.data.dataset import TokenDataset
 from tinylm.model import GPT, GPTConfig
+from tinylm.tokenizer import tokenizer_sha256
 from tinylm.training import TrainConfig, Trainer, initialize_model
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -124,6 +125,16 @@ def main() -> None:
     raw_config = json.loads(config_path.read_text(encoding="utf-8"))
 
     meta = json.loads((args.data_dir / "meta.json").read_text(encoding="utf-8"))
+    tokenizer_path = args.data_dir / "tokenizer.json"
+    actual_tokenizer_sha256 = (
+        tokenizer_sha256(tokenizer_path) if tokenizer_path.exists() else None
+    )
+    recorded_tokenizer_sha256 = meta.get("tokenizer_sha256")
+    if recorded_tokenizer_sha256 is not None:
+        if not isinstance(recorded_tokenizer_sha256, str) or actual_tokenizer_sha256 is None:
+            parser.error("prepared tokenizer fingerprint is invalid")
+        if recorded_tokenizer_sha256 != actual_tokenizer_sha256:
+            parser.error("prepared tokenizer does not match meta.json")
 
     model_config = GPTConfig.from_dict({**raw_config["model"], "vocab_size": meta["vocab_size"]})
     resume_checkpoint = (
@@ -186,7 +197,9 @@ def main() -> None:
     model = GPT(model_config, use_fused_attn=args.use_fused_attn)
     if initial_checkpoint is not None:
         try:
-            initialize_model(model, model_config, initial_checkpoint)
+            initialize_model(
+                model, model_config, initial_checkpoint, actual_tokenizer_sha256
+            )
         except ValueError as error:
             parser.error(str(error))
     print(f"model params (non-embedding): {model.num_params():,}")
@@ -199,6 +212,7 @@ def main() -> None:
             train_config,
             train_data,
             val_data,
+            tokenizer_sha256=actual_tokenizer_sha256,
             resume_checkpoint=resume_checkpoint,
             allow_max_steps_change=args.extend_to_step is not None,
         )

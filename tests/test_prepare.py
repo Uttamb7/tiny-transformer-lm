@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from tinylm.data.prepare import prepare_dataset
-from tinylm.tokenizer import ByteLevelBPETokenizer
+from tinylm.tokenizer import ByteLevelBPETokenizer, tokenizer_sha256
 
 
 def written_ids(out_dir: Path) -> list[int]:
@@ -26,6 +26,7 @@ def test_prepare_dataset_preserves_single_document_encoding(tmp_path: Path) -> N
     assert written_ids(out_dir) == tokenizer.encode(source.read_text(encoding="utf-8"))
     assert meta["document_count"] == 1
     assert meta["min_frequency"] == 2
+    assert meta["tokenizer_sha256"] == tokenizer_sha256(out_dir / "tokenizer.json")
 
 
 def test_prepare_dataset_configures_merge_frequency(tmp_path: Path) -> None:

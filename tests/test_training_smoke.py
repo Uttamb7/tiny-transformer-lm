@@ -8,6 +8,7 @@ import torch
 
 from tinylm.data.dataset import TokenDataset
 from tinylm.model import GPT, GPTConfig
+from tinylm.tokenizer import ByteLevelBPETokenizer
 from tinylm.training import TrainConfig, Trainer
 
 
@@ -22,6 +23,27 @@ def make_synthetic_bin(
     reps = num_tokens // pattern_len + 1
     ids = np.tile(pattern, reps)[:num_tokens].astype(np.uint16)
     ids.tofile(path)
+
+
+def test_training_cli_rejects_modified_prepared_tokenizer(tmp_path: Path) -> None:
+    tokenizer = ByteLevelBPETokenizer.train("", vocab_size=256)
+    tokenizer.save(tmp_path / "tokenizer.json")
+    (tmp_path / "meta.json").write_text(
+        '{"vocab_size": 257, "tokenizer_sha256": "' + "0" * 64 + '"}',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "scripts" / "train.py"),
+            "--config", "nano", "--data-dir", str(tmp_path), "--device", "cpu",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 2
+    assert "prepared tokenizer does not match meta.json" in result.stderr
 
 
 def test_training_reduces_loss_on_repetitive_pattern(tmp_path: Path) -> None:

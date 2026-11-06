@@ -14,7 +14,12 @@ from tinylm.model import GPT, GPTConfig
 from tinylm.training.lr_schedule import get_lr
 
 
-def initialize_model(model: GPT, model_config: GPTConfig, checkpoint: object) -> None:
+def initialize_model(
+    model: GPT,
+    model_config: GPTConfig,
+    checkpoint: object,
+    tokenizer_sha256: str | None = None,
+) -> None:
     if not isinstance(checkpoint, dict):
         raise ValueError("initialization checkpoint must be a dictionary")
     missing = sorted({"model_config", "model_state"} - checkpoint.keys())
@@ -22,6 +27,11 @@ def initialize_model(model: GPT, model_config: GPTConfig, checkpoint: object) ->
         raise ValueError("initialization checkpoint is missing " + ", ".join(missing))
     if checkpoint["model_config"] != model_config.to_dict():
         raise ValueError("initialization checkpoint model configuration does not match")
+    if (
+        checkpoint.get("tokenizer_sha256") is not None
+        and checkpoint["tokenizer_sha256"] != tokenizer_sha256
+    ):
+        raise ValueError("initialization checkpoint tokenizer does not match prepared data")
     try:
         model.load_state_dict(checkpoint["model_state"])
     except (RuntimeError, TypeError, AttributeError) as error:
@@ -110,6 +120,7 @@ class Trainer:
         val_data: TokenDataset,
         resume_checkpoint: dict | None = None,
         allow_max_steps_change: bool = False,
+        tokenizer_sha256: str | None = None,
     ) -> None:
         self.model = model.to(train_config.device)
         self.model.gradient_checkpointing = train_config.gradient_checkpointing
@@ -117,6 +128,7 @@ class Trainer:
         self.train_config = train_config
         self.train_data = train_data
         self.val_data = val_data
+        self.tokenizer_sha256 = tokenizer_sha256
         self.optimizer = self._build_optimizer()
         self.scaler = torch.amp.GradScaler(
             "cuda",
@@ -154,6 +166,11 @@ class Trainer:
             raise ValueError("checkpoint cannot be resumed; missing " + ", ".join(missing))
         if checkpoint["model_config"] != self.model_config.to_dict():
             raise ValueError("checkpoint model configuration does not match the requested config")
+        if (
+            checkpoint.get("tokenizer_sha256") is not None
+            and checkpoint["tokenizer_sha256"] != self.tokenizer_sha256
+        ):
+            raise ValueError("checkpoint tokenizer does not match prepared data")
         step = checkpoint["step"]
         if not isinstance(step, int) or step < 0:
             raise ValueError("checkpoint step is invalid")
@@ -287,6 +304,8 @@ class Trainer:
             if torch.device(self.train_config.device).type == "cuda"
             else None,
         }
+        if self.tokenizer_sha256 is not None:
+            checkpoint["tokenizer_sha256"] = self.tokenizer_sha256
         temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         try:
             torch.save(checkpoint, temporary)
