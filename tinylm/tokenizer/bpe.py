@@ -35,8 +35,16 @@ PRETOKENIZE_PATTERN = (
 NUM_BASE_BYTES = 256
 
 
+def file_sha256(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def tokenizer_sha256(path: str | Path) -> str:
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    return file_sha256(path)
 
 
 def _merge_pair(ids: list[int], pair: tuple[int, int], new_id: int) -> list[int]:

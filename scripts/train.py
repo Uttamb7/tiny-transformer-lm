@@ -13,7 +13,7 @@ import torch
 
 from tinylm.data.dataset import TokenDataset
 from tinylm.model import GPT, GPTConfig
-from tinylm.tokenizer import tokenizer_sha256
+from tinylm.tokenizer import file_sha256, tokenizer_sha256
 from tinylm.training import TrainConfig, Trainer, initialize_model
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -135,7 +135,6 @@ def main() -> None:
             parser.error("prepared tokenizer fingerprint is invalid")
         if recorded_tokenizer_sha256 != actual_tokenizer_sha256:
             parser.error("prepared tokenizer does not match meta.json")
-
     model_config = GPTConfig.from_dict({**raw_config["model"], "vocab_size": meta["vocab_size"]})
     resume_checkpoint = (
         torch.load(args.resume, map_location=args.device, weights_only=False)
@@ -157,6 +156,19 @@ def main() -> None:
     )
     if args.resume and args.run_name:
         parser.error("--run-name cannot be used with --resume")
+    actual_data_sha256 = {
+        split: file_sha256(args.data_dir / f"{split}.bin") for split in ("train", "val")
+    }
+    recorded_data_sha256 = meta.get("data_sha256")
+    if recorded_data_sha256 is not None:
+        if (
+            not isinstance(recorded_data_sha256, dict)
+            or set(recorded_data_sha256) != {"train", "val"}
+            or not all(isinstance(value, str) for value in recorded_data_sha256.values())
+        ):
+            parser.error("prepared data fingerprints are invalid")
+        if recorded_data_sha256 != actual_data_sha256:
+            parser.error("prepared data does not match meta.json")
     train_options = {**raw_config["train"]}
     if isinstance(resume_checkpoint, dict) and isinstance(
         resume_checkpoint.get("train_config"), dict
@@ -198,7 +210,8 @@ def main() -> None:
     if initial_checkpoint is not None:
         try:
             initialize_model(
-                model, model_config, initial_checkpoint, actual_tokenizer_sha256
+                model, model_config, initial_checkpoint, actual_tokenizer_sha256,
+                actual_data_sha256,
             )
         except ValueError as error:
             parser.error(str(error))
@@ -213,6 +226,7 @@ def main() -> None:
             train_data,
             val_data,
             tokenizer_sha256=actual_tokenizer_sha256,
+            data_sha256=actual_data_sha256,
             resume_checkpoint=resume_checkpoint,
             allow_max_steps_change=args.extend_to_step is not None,
         )

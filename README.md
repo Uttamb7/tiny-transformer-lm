@@ -189,6 +189,11 @@ checkpoint initialization, and generation reject a different tokenizer even when
 its vocabulary has the same size. Legacy prepared data and checkpoints without a
 fingerprint retain the existing vocabulary-size compatibility check.
 
+Newly prepared datasets also record SHA-256 fingerprints for `train.bin` and
+`val.bin`. Training validates both files, and new checkpoints bind resume and
+checkpoint initialization to those exact splits. Legacy metadata and checkpoints
+without split fingerprints retain their previous compatibility behavior.
+
 `--extend-to-step N` resumes past the checkpoint step using `N` as the new schedule
 target and records it in later checkpoints. All other training settings remain strict;
 changing the target also changes the remaining warmup/cosine learning-rate schedule.

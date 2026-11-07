@@ -7,7 +7,7 @@ from urllib.request import urlopen
 
 import numpy as np
 
-from tinylm.tokenizer import ByteLevelBPETokenizer, tokenizer_sha256
+from tinylm.tokenizer import ByteLevelBPETokenizer, file_sha256, tokenizer_sha256
 
 TINYSHAKESPEARE_URL = (
     "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
@@ -86,12 +86,15 @@ def prepare_dataset(
     if len(train_ids) < 2 or len(val_ids) < 2:
         raise ValueError("training and validation splits must each contain at least two tokens")
 
-    train_ids.tofile(out_dir / "train.bin")
-    val_ids.tofile(out_dir / "val.bin")
+    train_path = out_dir / "train.bin"
+    val_path = out_dir / "val.bin"
+    train_ids.tofile(train_path)
+    val_ids.tofile(val_path)
 
     meta: dict[str, object] = {
         "vocab_size": tokenizer.vocab_size,
         "tokenizer_sha256": tokenizer_sha256(tokenizer_path),
+        "data_sha256": {"train": file_sha256(train_path), "val": file_sha256(val_path)},
         "train_tokens": int(len(train_ids)),
         "val_tokens": int(len(val_ids)),
         "source_chars": training_chars + sum(map(len, validation_documents or [])),

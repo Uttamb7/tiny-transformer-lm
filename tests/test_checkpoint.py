@@ -22,6 +22,7 @@ def _make_trainer(
     resume_checkpoint: dict | None = None,
     model: GPT | None = None,
     tokenizer_sha256: str | None = None,
+    data_sha256: dict[str, str] | None = None,
     allow_max_steps_change: bool = False,
     **train_overrides,
 ) -> Trainer:
@@ -47,6 +48,7 @@ def _make_trainer(
         train_data,
         val_data,
         tokenizer_sha256=tokenizer_sha256,
+        data_sha256=data_sha256,
         resume_checkpoint=resume_checkpoint,
         allow_max_steps_change=allow_max_steps_change,
     )
@@ -80,12 +82,16 @@ def test_checkpoint_round_trip_preserves_weights_and_outputs(tmp_path: Path) -> 
 
 def test_checkpoint_binds_resume_and_initialization_to_tokenizer(tmp_path: Path) -> None:
     config = make_config()
-    trainer = _make_trainer(tmp_path, config, tokenizer_sha256="a" * 64)
+    data_sha256 = {"train": "b" * 64, "val": "c" * 64}
+    trainer = _make_trainer(
+        tmp_path, config, tokenizer_sha256="a" * 64, data_sha256=data_sha256
+    )
     path = tmp_path / "bound.pt"
     trainer.save_checkpoint(path, step=1, val_loss=2.0, best_val_loss=2.0)
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
 
     assert checkpoint["tokenizer_sha256"] == "a" * 64
+    assert checkpoint["data_sha256"] == data_sha256
     with pytest.raises(ValueError, match="tokenizer does not match"):
         _make_trainer(
             tmp_path, config, "wrong-tokenizer", tokenizer_sha256="b" * 64,
@@ -94,8 +100,20 @@ def test_checkpoint_binds_resume_and_initialization_to_tokenizer(tmp_path: Path)
     with pytest.raises(ValueError, match="tokenizer does not match"):
         initialize_model(GPT(config), config, checkpoint, "b" * 64)
 
-    legacy = {key: value for key, value in checkpoint.items() if key != "tokenizer_sha256"}
-    initialize_model(GPT(config), config, legacy, "b" * 64)
+    wrong_data = {"train": "d" * 64, "val": "c" * 64}
+    with pytest.raises(ValueError, match="data does not match"):
+        _make_trainer(
+            tmp_path, config, "wrong-data", tokenizer_sha256="a" * 64,
+            data_sha256=wrong_data, resume_checkpoint=checkpoint,
+        )
+    with pytest.raises(ValueError, match="data does not match"):
+        initialize_model(GPT(config), config, checkpoint, "a" * 64, wrong_data)
+
+    legacy = {
+        key: value for key, value in checkpoint.items()
+        if key not in {"tokenizer_sha256", "data_sha256"}
+    }
+    initialize_model(GPT(config), config, legacy, "b" * 64, wrong_data)
 
 
 def test_failed_checkpoint_save_preserves_previous_file(

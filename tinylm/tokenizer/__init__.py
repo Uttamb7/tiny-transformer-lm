@@ -1,3 +1,3 @@
-from tinylm.tokenizer.bpe import ByteLevelBPETokenizer, tokenizer_sha256
+from tinylm.tokenizer.bpe import ByteLevelBPETokenizer, file_sha256, tokenizer_sha256
 
-__all__ = ["ByteLevelBPETokenizer", "tokenizer_sha256"]
+__all__ = ["ByteLevelBPETokenizer", "file_sha256", "tokenizer_sha256"]

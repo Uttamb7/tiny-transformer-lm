@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -44,6 +45,36 @@ def test_training_cli_rejects_modified_prepared_tokenizer(tmp_path: Path) -> Non
     )
     assert result.returncode == 2
     assert "prepared tokenizer does not match meta.json" in result.stderr
+
+
+def test_training_cli_rejects_modified_prepared_data(tmp_path: Path) -> None:
+    from tinylm.tokenizer import ByteLevelBPETokenizer, file_sha256, tokenizer_sha256
+
+    tokenizer = ByteLevelBPETokenizer.train("", vocab_size=256)
+    tokenizer.save(tmp_path / "tokenizer.json")
+    train_path, val_path = tmp_path / "train.bin", tmp_path / "val.bin"
+    np.arange(32, dtype=np.uint16).tofile(train_path)
+    np.arange(32, dtype=np.uint16).tofile(val_path)
+    meta = {
+        "vocab_size": tokenizer.vocab_size,
+        "tokenizer_sha256": tokenizer_sha256(tmp_path / "tokenizer.json"),
+        "data_sha256": {
+            "train": file_sha256(train_path), "val": file_sha256(val_path),
+        },
+    }
+    (tmp_path / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    with train_path.open("ab") as file:
+        file.write(b"\x00\x00")
+
+    result = subprocess.run(
+        [
+            sys.executable, str(Path(__file__).resolve().parents[1] / "scripts" / "train.py"),
+            "--config", "nano", "--data-dir", str(tmp_path), "--device", "cpu",
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 2
+    assert "prepared data does not match meta.json" in result.stderr
 
 
 def test_training_reduces_loss_on_repetitive_pattern(tmp_path: Path) -> None:

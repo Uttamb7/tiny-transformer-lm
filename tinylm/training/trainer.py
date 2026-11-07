@@ -19,6 +19,7 @@ def initialize_model(
     model_config: GPTConfig,
     checkpoint: object,
     tokenizer_sha256: str | None = None,
+    data_sha256: dict[str, str] | None = None,
 ) -> None:
     if not isinstance(checkpoint, dict):
         raise ValueError("initialization checkpoint must be a dictionary")
@@ -32,6 +33,8 @@ def initialize_model(
         and checkpoint["tokenizer_sha256"] != tokenizer_sha256
     ):
         raise ValueError("initialization checkpoint tokenizer does not match prepared data")
+    if checkpoint.get("data_sha256") is not None and checkpoint["data_sha256"] != data_sha256:
+        raise ValueError("initialization checkpoint data does not match prepared data")
     try:
         model.load_state_dict(checkpoint["model_state"])
     except (RuntimeError, TypeError, AttributeError) as error:
@@ -121,6 +124,7 @@ class Trainer:
         resume_checkpoint: dict | None = None,
         allow_max_steps_change: bool = False,
         tokenizer_sha256: str | None = None,
+        data_sha256: dict[str, str] | None = None,
     ) -> None:
         self.model = model.to(train_config.device)
         self.model.gradient_checkpointing = train_config.gradient_checkpointing
@@ -129,6 +133,7 @@ class Trainer:
         self.train_data = train_data
         self.val_data = val_data
         self.tokenizer_sha256 = tokenizer_sha256
+        self.data_sha256 = data_sha256
         self.optimizer = self._build_optimizer()
         self.scaler = torch.amp.GradScaler(
             "cuda",
@@ -171,6 +176,11 @@ class Trainer:
             and checkpoint["tokenizer_sha256"] != self.tokenizer_sha256
         ):
             raise ValueError("checkpoint tokenizer does not match prepared data")
+        if (
+            checkpoint.get("data_sha256") is not None
+            and checkpoint["data_sha256"] != self.data_sha256
+        ):
+            raise ValueError("checkpoint data does not match prepared data")
         step = checkpoint["step"]
         if not isinstance(step, int) or step < 0:
             raise ValueError("checkpoint step is invalid")
@@ -306,6 +316,8 @@ class Trainer:
         }
         if self.tokenizer_sha256 is not None:
             checkpoint["tokenizer_sha256"] = self.tokenizer_sha256
+        if self.data_sha256 is not None:
+            checkpoint["data_sha256"] = self.data_sha256
         temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         try:
             torch.save(checkpoint, temporary)
