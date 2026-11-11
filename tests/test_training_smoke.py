@@ -476,6 +476,39 @@ def test_gradient_accumulation_requires_a_positive_integer(value, tmp_path: Path
         TrainConfig(out_dir=str(tmp_path), grad_accum_steps=value)
 
 
+@pytest.mark.parametrize(
+    ("option", "value", "message"),
+    [
+        ("max_steps", 0, "positive integer"),
+        ("batch_size", True, "positive integer"),
+        ("eval_interval", 1.5, "positive integer"),
+        ("eval_iters", -1, "positive integer"),
+        ("log_interval", 0, "positive integer"),
+        ("warmup_steps", -1, "nonnegative integer"),
+        ("warmup_steps", True, "nonnegative integer"),
+        ("max_lr", 0, "finite and positive"),
+        ("max_lr", float("inf"), "finite and positive"),
+        ("min_lr_ratio", -0.1, "in \\[0, 1\\]"),
+        ("min_lr_ratio", 1.1, "in \\[0, 1\\]"),
+        ("weight_decay", float("nan"), "finite and nonnegative"),
+        ("grad_clip", False, "finite and positive"),
+    ],
+)
+def test_training_configuration_rejects_invalid_core_controls(
+    option, value, message, tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        TrainConfig(out_dir=str(tmp_path), **{option: value})
+
+
+def test_training_configuration_accepts_valid_numeric_boundaries(tmp_path: Path) -> None:
+    config = TrainConfig(
+        out_dir=str(tmp_path), max_steps=1, warmup_steps=0,
+        min_lr_ratio=0, weight_decay=0,
+    )
+    assert (config.max_steps, config.warmup_steps) == (1, 0)
+
+
 @pytest.mark.parametrize("value", [0, -1, 1.5, True])
 def test_early_stopping_requires_a_positive_integer(value, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="positive integer"):

@@ -65,12 +65,39 @@ class TrainConfig:
     device: str = "cuda"
 
     def __post_init__(self) -> None:
-        if (
-            not isinstance(self.grad_accum_steps, int)
-            or isinstance(self.grad_accum_steps, bool)
-            or self.grad_accum_steps < 1
+        for name in (
+            "max_steps", "batch_size", "grad_accum_steps", "eval_interval",
+            "eval_iters", "log_interval",
         ):
-            raise ValueError("grad_accum_steps must be a positive integer")
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if (
+            not isinstance(self.warmup_steps, int)
+            or isinstance(self.warmup_steps, bool)
+            or self.warmup_steps < 0
+        ):
+            raise ValueError("warmup_steps must be a nonnegative integer")
+        numeric_ranges = {
+            "max_lr": (0, None, False),
+            "min_lr_ratio": (0, 1, True),
+            "weight_decay": (0, None, True),
+            "grad_clip": (0, None, False),
+        }
+        for name, (minimum, maximum, include_minimum) in numeric_ranges.items():
+            value = getattr(self, name)
+            valid = (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+                and (value >= minimum if include_minimum else value > minimum)
+                and (maximum is None or value <= maximum)
+            )
+            if not valid:
+                bounds = "in [0, 1]" if maximum == 1 else (
+                    "finite and nonnegative" if include_minimum else "finite and positive"
+                )
+                raise ValueError(f"{name} must be {bounds}")
         if self.early_stopping_patience is not None and (
             not isinstance(self.early_stopping_patience, int)
             or isinstance(self.early_stopping_patience, bool)
