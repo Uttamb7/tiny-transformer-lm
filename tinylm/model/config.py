@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 
 
@@ -14,10 +15,21 @@ class GPTConfig:
     bias: bool = True
 
     def __post_init__(self) -> None:
+        for name in ("vocab_size", "block_size", "n_layer", "n_head", "n_embd"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if (
+            not isinstance(self.dropout, (int, float))
+            or isinstance(self.dropout, bool)
+            or not math.isfinite(self.dropout)
+            or not 0 <= self.dropout < 1
+        ):
+            raise ValueError("dropout must be finite and in [0, 1)")
+        if not isinstance(self.bias, bool):
+            raise ValueError("bias must be a boolean")
         if self.n_embd % self.n_head != 0:
             raise ValueError(f"n_embd ({self.n_embd}) must be divisible by n_head ({self.n_head})")
-        if self.n_layer < 1:
-            raise ValueError("n_layer must be >= 1")
 
     def to_dict(self) -> dict:
         return asdict(self)

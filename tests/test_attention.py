@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from tinylm.model.attention import CausalSelfAttention
@@ -73,7 +74,46 @@ def test_cached_attention_matches_full_attention() -> None:
 
 
 def test_rejects_incompatible_head_count() -> None:
-    import pytest
-
     with pytest.raises(ValueError):
         make_config(n_embd=10, n_head=3)
+
+
+@pytest.mark.parametrize(
+    "field,value,message",
+    [
+        ("vocab_size", 0, "positive integer"),
+        ("block_size", -1, "positive integer"),
+        ("n_layer", 1.5, "positive integer"),
+        ("n_head", True, "positive integer"),
+        ("n_embd", 0, "positive integer"),
+        ("dropout", -0.1, r"in \[0, 1\)"),
+        ("dropout", 1.0, r"in \[0, 1\)"),
+        ("dropout", float("nan"), r"in \[0, 1\)"),
+        ("bias", 1, "boolean"),
+    ],
+)
+def test_rejects_invalid_model_configuration(field, value, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        make_config(**{field: value})
+
+
+def test_model_configuration_accepts_numeric_boundaries_and_checkpoint_fields() -> None:
+    config = GPTConfig.from_dict({
+        "vocab_size": 1,
+        "block_size": 1,
+        "n_layer": 1,
+        "n_head": 1,
+        "n_embd": 1,
+        "dropout": 0,
+        "bias": False,
+        "future_checkpoint_field": "ignored",
+    })
+    assert config.to_dict() == {
+        "vocab_size": 1,
+        "block_size": 1,
+        "n_layer": 1,
+        "n_head": 1,
+        "n_embd": 1,
+        "dropout": 0,
+        "bias": False,
+    }
