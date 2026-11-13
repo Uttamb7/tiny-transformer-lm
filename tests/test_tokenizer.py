@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from tinylm.tokenizer import ByteLevelBPETokenizer
@@ -57,6 +59,44 @@ def test_save_and_load_round_trip(tmp_path, trained_tokenizer: ByteLevelBPEToken
     assert loaded.vocab_size == trained_tokenizer.vocab_size
     assert loaded.encode(SAMPLE_TEXT) == trained_tokenizer.encode(SAMPLE_TEXT)
     assert loaded.decode(loaded.encode(SAMPLE_TEXT)) == SAMPLE_TEXT
+
+
+@pytest.mark.parametrize(
+    "data,message",
+    [
+        ([], "expected an object"),
+        ({"pattern": "(", "merges": [], "special_tokens": {}}, "valid regex"),
+        ({"pattern": ".*", "merges": [[97, 98]], "special_tokens": {}}, "three integers"),
+        ({"pattern": ".*", "merges": [[97, 999, 256]], "special_tokens": {}}, "unknown token"),
+        ({"pattern": ".*", "merges": [[97, 98, 257]], "special_tokens": {}}, "sequential"),
+        (
+            {
+                "pattern": ".*",
+                "merges": [[97, 98, 256], [97, 98, 257]],
+                "special_tokens": {},
+            },
+            "unique",
+        ),
+        (
+            {"pattern": ".*", "merges": [], "special_tokens": {"<first>": 257}},
+            "unique and sequential",
+        ),
+        (
+            {
+                "pattern": ".*",
+                "merges": [],
+                "special_tokens": {"<first>": 256, "<second>": 256},
+            },
+            "unique and sequential",
+        ),
+    ],
+)
+def test_load_rejects_invalid_tokenizer_files(tmp_path, data, message) -> None:
+    path = tmp_path / "tokenizer.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        ByteLevelBPETokenizer.load(path)
 
 
 def test_train_rejects_vocab_size_below_256() -> None:

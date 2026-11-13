@@ -234,18 +234,66 @@ class ByteLevelBPETokenizer:
     @classmethod
     def load(cls, path: str | Path) -> ByteLevelBPETokenizer:
         path = Path(path)
-        data = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise ValueError("invalid tokenizer file: expected UTF-8 JSON") from error
+        if not isinstance(data, dict):
+            raise ValueError("invalid tokenizer file: expected an object")
+
+        pattern = data.get("pattern")
+        if not isinstance(pattern, str):
+            raise ValueError("invalid tokenizer file: pattern must be a string")
+        try:
+            re.compile(pattern)
+        except re.error as error:
+            raise ValueError("invalid tokenizer file: pattern is not a valid regex") from error
+
+        records = data.get("merges")
+        if not isinstance(records, list):
+            raise ValueError("invalid tokenizer file: merges must be a list")
 
         vocab: dict[int, bytes] = {i: bytes([i]) for i in range(NUM_BASE_BYTES)}
         merges: dict[tuple[int, int], int] = {}
-        for a, b, new_id in data["merges"]:
+        for index, record in enumerate(records):
+            if (
+                not isinstance(record, list)
+                or len(record) != 3
+                or any(not isinstance(value, int) or isinstance(value, bool) for value in record)
+            ):
+                raise ValueError(
+                    "invalid tokenizer file: merge records must contain three integers"
+                )
+            a, b, new_id = record
+            if a not in vocab or b not in vocab:
+                raise ValueError("invalid tokenizer file: merge references an unknown token")
+            if new_id != NUM_BASE_BYTES + index:
+                raise ValueError("invalid tokenizer file: merge IDs must be sequential")
+            if (a, b) in merges:
+                raise ValueError("invalid tokenizer file: merge pairs must be unique")
             merges[(a, b)] = new_id
             vocab[new_id] = vocab[a] + vocab[b]
 
-        special_tokens = {k: int(v) for k, v in data["special_tokens"].items()}
+        special_data = data.get("special_tokens")
+        if not isinstance(special_data, dict):
+            raise ValueError("invalid tokenizer file: special_tokens must be an object")
+        special_tokens: dict[str, int] = {}
+        first_special_id = NUM_BASE_BYTES + len(merges)
+        for index, (token, token_id) in enumerate(special_data.items()):
+            if not isinstance(token, str) or not token:
+                raise ValueError("invalid tokenizer file: special tokens must be non-empty strings")
+            if (
+                not isinstance(token_id, int)
+                or isinstance(token_id, bool)
+                or token_id != first_special_id + index
+            ):
+                raise ValueError(
+                    "invalid tokenizer file: special token IDs must be unique and sequential"
+                )
+            special_tokens[token] = token_id
         return cls(
             merges=merges,
             vocab=vocab,
             special_tokens=special_tokens,
-            pattern=data["pattern"],
+            pattern=pattern,
         )
