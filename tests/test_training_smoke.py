@@ -26,6 +26,74 @@ def make_synthetic_bin(
     ids.tofile(path)
 
 
+def test_training_cli_overrides_fresh_step_budget(tmp_path: Path, monkeypatch) -> None:
+    from scripts import train as train_script
+
+    (tmp_path / "configs").mkdir()
+    config = json.dumps({
+        "model": {
+            "block_size": 4, "n_layer": 1, "n_head": 1, "n_embd": 8,
+            "dropout": 0.0, "bias": True,
+        },
+        "train": {
+            "max_steps": 1, "warmup_steps": 0, "batch_size": 2,
+            "max_lr": 1e-3, "weight_decay": 0.0, "grad_clip": 1.0,
+            "eval_interval": 1, "eval_iters": 1, "seed": 1,
+        },
+    })
+    for config_name in ("default", "override"):
+        (tmp_path / "configs" / f"{config_name}.json").write_text(config, encoding="utf-8")
+    (tmp_path / "data" / "test").mkdir(parents=True)
+    for split in ("train", "val"):
+        make_synthetic_bin(tmp_path / "data" / "test" / f"{split}.bin", 16, 100, 4)
+    (tmp_path / "data" / "test" / "meta.json").write_text(
+        '{"vocab_size": 16}', encoding="utf-8"
+    )
+    monkeypatch.setattr(train_script, "REPO_ROOT", tmp_path)
+
+    for config_name, extra, expected in (
+        ("default", [], 1),
+        ("override", ["--max-steps", "2"], 2),
+    ):
+        monkeypatch.setattr(sys, "argv", [
+            "train.py", "--config", config_name,
+            "--data-dir", str(tmp_path / "data" / "test"), "--device", "cpu", *extra,
+        ])
+        train_script.main()
+        checkpoint = torch.load(
+            tmp_path / "runs" / config_name / "last.pt",
+            map_location="cpu", weights_only=False,
+        )
+        summary = json.loads(
+            (tmp_path / "runs" / config_name / "summary.json").read_text(encoding="utf-8")
+        )
+        assert checkpoint["step"] == expected
+        assert checkpoint["train_config"]["max_steps"] == expected
+        assert summary["train_config"]["max_steps"] == expected
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (["--max-steps", "0"], "--max-steps must be a positive integer"),
+        (
+            ["--resume", "missing.pt", "--max-steps", "2"],
+            "use --extend-to-step when resuming",
+        ),
+    ],
+)
+def test_training_cli_rejects_invalid_fresh_step_override(arguments, message) -> None:
+    result = subprocess.run(
+        [
+            sys.executable, str(Path(__file__).parents[1] / "scripts" / "train.py"),
+            "--config", "missing", *arguments,
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 2
+    assert message in result.stderr
+
+
 def test_training_cli_rejects_modified_prepared_tokenizer(tmp_path: Path) -> None:
     tokenizer = ByteLevelBPETokenizer.train("", vocab_size=256)
     tokenizer.save(tmp_path / "tokenizer.json")

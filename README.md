@@ -66,6 +66,9 @@ python scripts/prepare_data.py --input-file corpus/*.txt --min-frequency 5 --out
 # 2. Train a model (nano / tiny / small)
 python scripts/train.py --config tiny
 
+# Override the named config's step budget for a fresh experiment
+python scripts/train.py --config tiny --max-steps 500
+
 # Resume an interrupted run from its latest checkpoint
 python scripts/train.py --config tiny --resume runs/tiny/last.pt
 

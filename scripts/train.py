@@ -23,6 +23,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, help="name under configs/, e.g. 'tiny'")
     parser.add_argument(
+        "--max-steps", type=int,
+        help="override the config step budget for a fresh run",
+    )
+    parser.add_argument(
         "--data-dir", type=Path, default=REPO_ROOT / "data_raw" / "tinyshakespeare"
     )
     parser.add_argument("--run-name", type=str, default=None)
@@ -76,6 +80,10 @@ def main() -> None:
 
     if args.resume and args.init_from:
         parser.error("--resume and --init-from are mutually exclusive")
+    if args.max_steps is not None and args.max_steps < 1:
+        parser.error("--max-steps must be a positive integer")
+    if args.max_steps is not None and args.resume:
+        parser.error("--max-steps is for fresh runs; use --extend-to-step when resuming")
     if args.extend_to_step is not None and args.resume is None:
         parser.error("--extend-to-step requires --resume")
     if args.extend_to_step is not None and args.extend_to_step < 1:
@@ -176,6 +184,8 @@ def main() -> None:
         train_options["max_steps"] = resume_checkpoint["train_config"].get(
             "max_steps", train_options.get("max_steps")
         )
+    if args.max_steps is not None:
+        train_options["max_steps"] = args.max_steps
     if args.extend_to_step is not None:
         train_options["max_steps"] = args.extend_to_step
     if args.grad_accum_steps is not None:
