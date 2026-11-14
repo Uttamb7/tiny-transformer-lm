@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import subprocess
 import sys
@@ -27,7 +28,11 @@ def make_synthetic_bin(
 
 
 def test_training_cli_overrides_fresh_step_budget(tmp_path: Path, monkeypatch) -> None:
-    from scripts import train as train_script
+    script = Path(__file__).parents[1] / "scripts" / "train.py"
+    spec = importlib.util.spec_from_file_location("train_script", script)
+    assert spec is not None and spec.loader is not None
+    train_script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(train_script)
 
     (tmp_path / "configs").mkdir()
     config = json.dumps({
