@@ -27,7 +27,7 @@ def make_synthetic_bin(
     ids.tofile(path)
 
 
-def test_training_cli_overrides_fresh_step_budget(tmp_path: Path, monkeypatch) -> None:
+def test_training_cli_overrides_fresh_config(tmp_path: Path, monkeypatch) -> None:
     script = Path(__file__).parents[1] / "scripts" / "train.py"
     spec = importlib.util.spec_from_file_location("train_script", script)
     assert spec is not None and spec.loader is not None
@@ -46,7 +46,7 @@ def test_training_cli_overrides_fresh_step_budget(tmp_path: Path, monkeypatch) -
             "eval_interval": 1, "eval_iters": 1, "seed": 1,
         },
     })
-    for config_name in ("default", "override"):
+    for config_name in ("default", "steps", "seed"):
         (tmp_path / "configs" / f"{config_name}.json").write_text(config, encoding="utf-8")
     (tmp_path / "data" / "test").mkdir(parents=True)
     for split in ("train", "val"):
@@ -56,9 +56,11 @@ def test_training_cli_overrides_fresh_step_budget(tmp_path: Path, monkeypatch) -
     )
     monkeypatch.setattr(train_script, "REPO_ROOT", tmp_path)
 
-    for config_name, extra, expected in (
-        ("default", [], 1),
-        ("override", ["--max-steps", "2"], 2),
+    checkpoints = {}
+    for config_name, extra, expected_steps, expected_seed in (
+        ("default", [], 1, 1),
+        ("steps", ["--max-steps", "2"], 2, 1),
+        ("seed", ["--seed", "7"], 1, 7),
     ):
         monkeypatch.setattr(sys, "argv", [
             "train.py", "--config", config_name,
@@ -72,9 +74,33 @@ def test_training_cli_overrides_fresh_step_budget(tmp_path: Path, monkeypatch) -
         summary = json.loads(
             (tmp_path / "runs" / config_name / "summary.json").read_text(encoding="utf-8")
         )
-        assert checkpoint["step"] == expected
-        assert checkpoint["train_config"]["max_steps"] == expected
-        assert summary["train_config"]["max_steps"] == expected
+        assert checkpoint["step"] == expected_steps
+        assert checkpoint["train_config"]["max_steps"] == expected_steps
+        assert checkpoint["train_config"]["seed"] == expected_seed
+        assert summary["train_config"]["max_steps"] == expected_steps
+        assert summary["train_config"]["seed"] == expected_seed
+        checkpoints[config_name] = checkpoint
+
+    assert any(
+        not torch.equal(checkpoints["default"]["model_state"][name], value)
+        for name, value in checkpoints["seed"]["model_state"].items()
+    )
+
+    monkeypatch.setattr(sys, "argv", [
+        "train.py", "--config", "default", "--data-dir", str(tmp_path / "data" / "test"),
+        "--device", "cpu", "--init-from", str(tmp_path / "runs" / "default" / "last.pt"),
+        "--run-name", "initialized", "--seed", "9",
+    ])
+    train_script.main()
+    initialized = torch.load(
+        tmp_path / "runs" / "initialized" / "last.pt",
+        map_location="cpu", weights_only=False,
+    )
+    initialized_summary = json.loads(
+        (tmp_path / "runs" / "initialized" / "summary.json").read_text(encoding="utf-8")
+    )
+    assert initialized["train_config"]["seed"] == 9
+    assert initialized_summary["train_config"]["seed"] == 9
 
 
 @pytest.mark.parametrize(
@@ -84,6 +110,10 @@ def test_training_cli_overrides_fresh_step_budget(tmp_path: Path, monkeypatch) -
         (
             ["--resume", "missing.pt", "--max-steps", "2"],
             "use --extend-to-step when resuming",
+        ),
+        (
+            ["--resume", "missing.pt", "--seed", "7"],
+            "resume restores checkpoint random state",
         ),
     ],
 )

@@ -69,6 +69,9 @@ python scripts/train.py --config tiny
 # Override the named config's step budget for a fresh experiment
 python scripts/train.py --config tiny --max-steps 500
 
+# Run a controlled fresh experiment with another seed
+python scripts/train.py --config tiny --seed 42
+
 # Resume an interrupted run from its latest checkpoint
 python scripts/train.py --config tiny --resume runs/tiny/last.pt
 
@@ -200,6 +203,10 @@ without split fingerprints retain their previous compatibility behavior.
 `--extend-to-step N` resumes past the checkpoint step using `N` as the new schedule
 target and records it in later checkpoints. All other training settings remain strict;
 changing the target also changes the remaining warmup/cosine learning-rate schedule.
+
+`--seed N` overrides the named config for fresh and checkpoint-initialized runs and is
+recorded in checkpoints and the run summary. Resume restores the checkpoint's random
+state, so it does not accept a seed override.
 
 `--init-from` starts a new named run from checkpoint model weights only. The model
 configuration and prepared-data vocabulary must match exactly; optimizer, scaler,

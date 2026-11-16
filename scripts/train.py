@@ -26,6 +26,7 @@ def main() -> None:
         "--max-steps", type=int,
         help="override the config step budget for a fresh run",
     )
+    parser.add_argument("--seed", type=int, help="override the config seed for a fresh run")
     parser.add_argument(
         "--data-dir", type=Path, default=REPO_ROOT / "data_raw" / "tinyshakespeare"
     )
@@ -84,6 +85,8 @@ def main() -> None:
         parser.error("--max-steps must be a positive integer")
     if args.max_steps is not None and args.resume:
         parser.error("--max-steps is for fresh runs; use --extend-to-step when resuming")
+    if args.seed is not None and args.resume:
+        parser.error("--seed is for fresh runs; resume restores checkpoint random state")
     if args.extend_to_step is not None and args.resume is None:
         parser.error("--extend-to-step requires --resume")
     if args.extend_to_step is not None and args.extend_to_step < 1:
@@ -186,6 +189,8 @@ def main() -> None:
         )
     if args.max_steps is not None:
         train_options["max_steps"] = args.max_steps
+    if args.seed is not None:
+        train_options["seed"] = args.seed
     if args.extend_to_step is not None:
         train_options["max_steps"] = args.extend_to_step
     if args.grad_accum_steps is not None:
