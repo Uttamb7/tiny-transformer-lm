@@ -81,6 +81,14 @@ def main() -> None:
 
     if args.resume and args.init_from:
         parser.error("--resume and --init-from are mutually exclusive")
+    if args.resume and args.run_name:
+        parser.error("--run-name cannot be used with --resume")
+    if args.run_name is not None and (
+        not args.run_name or args.run_name in {".", ".."} or any(
+            separator in args.run_name for separator in ("/", "\\")
+        )
+    ):
+        parser.error("--run-name must be a single non-empty path component")
     if args.max_steps is not None and args.max_steps < 1:
         parser.error("--max-steps must be a positive integer")
     if args.max_steps is not None and args.resume:
@@ -93,14 +101,15 @@ def main() -> None:
         parser.error("--extend-to-step must be a positive integer")
     if args.init_from and not args.run_name:
         parser.error("--init-from requires --run-name")
-    initial_run_dir = REPO_ROOT / "runs" / args.run_name if args.init_from else None
+    named_run_dir = REPO_ROOT / "runs" / args.run_name if args.run_name else None
     if (
-        initial_run_dir is not None
-        and initial_run_dir.resolve() == args.init_from.resolve().parent
+        named_run_dir is not None
+        and args.init_from is not None
+        and named_run_dir.resolve() == args.init_from.resolve().parent
     ):
         parser.error("--init-from output must differ from the source checkpoint directory")
-    if initial_run_dir and initial_run_dir.exists():
-        parser.error("--init-from output run already exists")
+    if named_run_dir and named_run_dir.exists():
+        parser.error("named output run already exists")
     if args.mixed_precision_dtype is not None and not args.mixed_precision:
         parser.error("--mixed-precision-dtype requires --mixed-precision")
     if args.mixed_precision and (
@@ -165,8 +174,6 @@ def main() -> None:
         if args.init_from
         else None
     )
-    if args.resume and args.run_name:
-        parser.error("--run-name cannot be used with --resume")
     actual_data_sha256 = {
         split: file_sha256(args.data_dir / f"{split}.bin") for split in ("train", "val")
     }
@@ -211,7 +218,7 @@ def main() -> None:
         out_dir=str(
             args.resume.resolve().parent
             if args.resume
-            else initial_run_dir or REPO_ROOT / "runs" / args.config
+            else named_run_dir or REPO_ROOT / "runs" / args.config
         ),
         device=args.device,
         **train_options,

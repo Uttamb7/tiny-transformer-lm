@@ -46,7 +46,7 @@ def test_training_cli_overrides_fresh_config(tmp_path: Path, monkeypatch) -> Non
             "eval_interval": 1, "eval_iters": 1, "seed": 1,
         },
     })
-    for config_name in ("default", "steps", "seed"):
+    for config_name in ("default", "steps", "seed", "named"):
         (tmp_path / "configs" / f"{config_name}.json").write_text(config, encoding="utf-8")
     (tmp_path / "data" / "test").mkdir(parents=True)
     for split in ("train", "val"):
@@ -57,10 +57,11 @@ def test_training_cli_overrides_fresh_config(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setattr(train_script, "REPO_ROOT", tmp_path)
 
     checkpoints = {}
-    for config_name, extra, expected_steps, expected_seed in (
-        ("default", [], 1, 1),
-        ("steps", ["--max-steps", "2"], 2, 1),
-        ("seed", ["--seed", "7"], 1, 7),
+    for config_name, extra, expected_steps, expected_seed, output_name in (
+        ("default", [], 1, 1, "default"),
+        ("steps", ["--max-steps", "2"], 2, 1, "steps"),
+        ("seed", ["--seed", "7"], 1, 7, "seed"),
+        ("named", ["--run-name", "experiment"], 1, 1, "experiment"),
     ):
         monkeypatch.setattr(sys, "argv", [
             "train.py", "--config", config_name,
@@ -68,11 +69,11 @@ def test_training_cli_overrides_fresh_config(tmp_path: Path, monkeypatch) -> Non
         ])
         train_script.main()
         checkpoint = torch.load(
-            tmp_path / "runs" / config_name / "last.pt",
+            tmp_path / "runs" / output_name / "last.pt",
             map_location="cpu", weights_only=False,
         )
         summary = json.loads(
-            (tmp_path / "runs" / config_name / "summary.json").read_text(encoding="utf-8")
+            (tmp_path / "runs" / output_name / "summary.json").read_text(encoding="utf-8")
         )
         assert checkpoint["step"] == expected_steps
         assert checkpoint["train_config"]["max_steps"] == expected_steps
@@ -739,6 +740,11 @@ def test_checkpoint_initialization_cli_boundaries(tmp_path: Path) -> None:
                 ["--init-from", "best.pt", "--run-name", existing_run.name],
                 "output run already exists",
             ),
+            (["--run-name", existing_run.name], "output run already exists"),
+            (["--run-name", ""], "single non-empty path component"),
+            (["--run-name", "nested/run"], "single non-empty path component"),
+            (["--run-name", "nested\\run"], "single non-empty path component"),
+            (["--run-name", ".."], "single non-empty path component"),
             (["--extend-to-step", "10"], "requires --resume"),
             (["--resume", "missing.pt", "--extend-to-step", "0"], "positive integer"),
         ]:

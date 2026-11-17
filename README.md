@@ -72,6 +72,9 @@ python scripts/train.py --config tiny --max-steps 500
 # Run a controlled fresh experiment with another seed
 python scripts/train.py --config tiny --seed 42
 
+# Keep a fresh experiment in its own new runs/ directory
+python scripts/train.py --config tiny --run-name tiny-seed-42 --seed 42
+
 # Resume an interrupted run from its latest checkpoint
 python scripts/train.py --config tiny --resume runs/tiny/last.pt
 
@@ -207,6 +210,10 @@ changing the target also changes the remaining warmup/cosine learning-rate sched
 `--seed N` overrides the named config for fresh and checkpoint-initialized runs and is
 recorded in checkpoints and the run summary. Resume restores the checkpoint's random
 state, so it does not accept a seed override.
+
+`--run-name NAME` writes a fresh run to a new `runs/NAME` directory instead of the
+config-named directory. Names are single path components, and existing directories
+are rejected so experiment checkpoints and metrics are not reused accidentally.
 
 `--init-from` starts a new named run from checkpoint model weights only. The model
 configuration and prepared-data vocabulary must match exactly; optimizer, scaler,
