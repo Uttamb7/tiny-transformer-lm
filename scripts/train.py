@@ -28,6 +28,10 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, help="override the config seed for a fresh run")
     parser.add_argument(
+        "--batch-size", type=int,
+        help="override the config micro-batch size for a fresh run",
+    )
+    parser.add_argument(
         "--data-dir", type=Path, default=REPO_ROOT / "data_raw" / "tinyshakespeare"
     )
     parser.add_argument("--run-name", type=str, default=None)
@@ -95,6 +99,10 @@ def main() -> None:
         parser.error("--max-steps is for fresh runs; use --extend-to-step when resuming")
     if args.seed is not None and args.resume:
         parser.error("--seed is for fresh runs; resume restores checkpoint random state")
+    if args.batch_size is not None and args.batch_size < 1:
+        parser.error("--batch-size must be a positive integer")
+    if args.batch_size is not None and args.resume:
+        parser.error("--batch-size is for fresh runs; resume uses the checkpoint batch size")
     if args.extend_to_step is not None and args.resume is None:
         parser.error("--extend-to-step requires --resume")
     if args.extend_to_step is not None and args.extend_to_step < 1:
@@ -198,6 +206,8 @@ def main() -> None:
         train_options["max_steps"] = args.max_steps
     if args.seed is not None:
         train_options["seed"] = args.seed
+    if args.batch_size is not None:
+        train_options["batch_size"] = args.batch_size
     if args.extend_to_step is not None:
         train_options["max_steps"] = args.extend_to_step
     if args.grad_accum_steps is not None:

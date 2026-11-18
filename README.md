@@ -72,6 +72,9 @@ python scripts/train.py --config tiny --max-steps 500
 # Run a controlled fresh experiment with another seed
 python scripts/train.py --config tiny --seed 42
 
+# Adapt a fresh run's micro-batch size to available device memory
+python scripts/train.py --config tiny --batch-size 32
+
 # Keep a fresh experiment in its own new runs/ directory
 python scripts/train.py --config tiny --run-name tiny-seed-42 --seed 42
 
@@ -210,6 +213,10 @@ changing the target also changes the remaining warmup/cosine learning-rate sched
 `--seed N` overrides the named config for fresh and checkpoint-initialized runs and is
 recorded in checkpoints and the run summary. Resume restores the checkpoint's random
 state, so it does not accept a seed override.
+
+`--batch-size N` overrides the named config's micro-batch size for fresh and
+checkpoint-initialized runs and is recorded in checkpoints and the run summary.
+Resume retains the checkpoint batch size and does not accept this override.
 
 `--run-name NAME` writes a fresh run to a new `runs/NAME` directory instead of the
 config-named directory. Names are single path components, and existing directories
