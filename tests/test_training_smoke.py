@@ -46,7 +46,7 @@ def test_training_cli_overrides_fresh_config(tmp_path: Path, monkeypatch) -> Non
             "eval_interval": 1, "eval_iters": 1, "seed": 1,
         },
     })
-    for config_name in ("default", "steps", "seed", "batch", "named"):
+    for config_name in ("default", "steps", "seed", "batch", "lr", "named"):
         (tmp_path / "configs" / f"{config_name}.json").write_text(config, encoding="utf-8")
     (tmp_path / "data" / "test").mkdir(parents=True)
     for split in ("train", "val"):
@@ -57,13 +57,18 @@ def test_training_cli_overrides_fresh_config(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setattr(train_script, "REPO_ROOT", tmp_path)
 
     checkpoints = {}
-    for config_name, extra, expected_steps, expected_seed, expected_batch, output_name in (
-        ("default", [], 1, 1, 2, "default"),
-        ("steps", ["--max-steps", "2"], 2, 1, 2, "steps"),
-        ("seed", ["--seed", "7"], 1, 7, 2, "seed"),
-        ("batch", ["--batch-size", "3"], 1, 1, 3, "batch"),
-        ("named", ["--run-name", "experiment"], 1, 1, 2, "experiment"),
-    ):
+    cases = (
+        ("default", [], 1, 1, 2, 1e-3, "default"),
+        ("steps", ["--max-steps", "2"], 2, 1, 2, 1e-3, "steps"),
+        ("seed", ["--seed", "7"], 1, 7, 2, 1e-3, "seed"),
+        ("batch", ["--batch-size", "3"], 1, 1, 3, 1e-3, "batch"),
+        ("lr", ["--max-lr", "0.002"], 1, 1, 2, 2e-3, "lr"),
+        ("named", ["--run-name", "experiment"], 1, 1, 2, 1e-3, "experiment"),
+    )
+    for (
+        config_name, extra, expected_steps, expected_seed,
+        expected_batch, expected_lr, output_name,
+    ) in cases:
         monkeypatch.setattr(sys, "argv", [
             "train.py", "--config", config_name,
             "--data-dir", str(tmp_path / "data" / "test"), "--device", "cpu", *extra,
@@ -80,9 +85,11 @@ def test_training_cli_overrides_fresh_config(tmp_path: Path, monkeypatch) -> Non
         assert checkpoint["train_config"]["max_steps"] == expected_steps
         assert checkpoint["train_config"]["seed"] == expected_seed
         assert checkpoint["train_config"]["batch_size"] == expected_batch
+        assert checkpoint["train_config"]["max_lr"] == expected_lr
         assert summary["train_config"]["max_steps"] == expected_steps
         assert summary["train_config"]["seed"] == expected_seed
         assert summary["train_config"]["batch_size"] == expected_batch
+        assert summary["train_config"]["max_lr"] == expected_lr
         checkpoints[config_name] = checkpoint
 
     assert any(
@@ -94,6 +101,7 @@ def test_training_cli_overrides_fresh_config(tmp_path: Path, monkeypatch) -> Non
         "train.py", "--config", "default", "--data-dir", str(tmp_path / "data" / "test"),
         "--device", "cpu", "--init-from", str(tmp_path / "runs" / "default" / "last.pt"),
         "--run-name", "initialized", "--seed", "9", "--batch-size", "3",
+        "--max-lr", "0.003",
     ])
     train_script.main()
     initialized = torch.load(
@@ -107,6 +115,8 @@ def test_training_cli_overrides_fresh_config(tmp_path: Path, monkeypatch) -> Non
     assert initialized_summary["train_config"]["seed"] == 9
     assert initialized["train_config"]["batch_size"] == 3
     assert initialized_summary["train_config"]["batch_size"] == 3
+    assert initialized["train_config"]["max_lr"] == 3e-3
+    assert initialized_summary["train_config"]["max_lr"] == 3e-3
 
 
 @pytest.mark.parametrize(
@@ -125,6 +135,12 @@ def test_training_cli_overrides_fresh_config(tmp_path: Path, monkeypatch) -> Non
         (
             ["--resume", "missing.pt", "--batch-size", "3"],
             "resume uses the checkpoint batch size",
+        ),
+        (["--max-lr", "0"], "--max-lr must be finite and positive"),
+        (["--max-lr", "nan"], "--max-lr must be finite and positive"),
+        (
+            ["--resume", "missing.pt", "--max-lr", "0.001"],
+            "resume uses the checkpoint learning rate",
         ),
     ],
 )
