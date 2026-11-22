@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from runpy import run_path
 
+import pytest
 import torch
 
 from tinylm.model import GPT, GPTConfig
@@ -11,6 +12,68 @@ from tinylm.tokenizer import ByteLevelBPETokenizer, tokenizer_sha256
 generate_cli = run_path(
     str(Path(__file__).resolve().parents[1] / "scripts" / "generate.py")
 )
+
+
+def test_generate_cli_reads_prompt_file_exactly_and_preserves_default(
+    tmp_path, monkeypatch
+) -> None:
+    tokenizer = ByteLevelBPETokenizer.train("", vocab_size=256)
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer.save(tokenizer_path)
+    prompt_path = tmp_path / "prompt.txt"
+    expected = "First line\r\nSecond line\n"
+    prompt_path.write_bytes(expected.encode("utf-8"))
+    captured = []
+
+    class Model:
+        config = GPTConfig(vocab_size=tokenizer.vocab_size)
+
+        def generate(self, idx, **options):
+            captured.append(idx[0].tolist())
+            return idx
+
+    monkeypatch.setitem(
+        generate_cli["main"].__globals__,
+        "load_model",
+        lambda checkpoint_path, device: (Model(), {"step": 0, "val_loss": 0.0}),
+    )
+    base = [
+        "generate.py", "--checkpoint", str(tmp_path / "unused.pt"),
+        "--tokenizer", str(tokenizer_path), "--device", "cpu",
+    ]
+    for extra in (["--prompt-file", str(prompt_path)], []):
+        monkeypatch.setattr(sys, "argv", base + extra)
+        generate_cli["main"]()
+
+    assert tokenizer.decode(captured[0]) == expected
+    assert tokenizer.decode(captured[1]) == "\n"
+
+
+@pytest.mark.parametrize("case", ["exclusive", "missing", "invalid-utf8"])
+def test_generate_cli_rejects_invalid_prompt_files_before_loading(
+    tmp_path: Path, case: str
+) -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "generate.py"
+    prompt_path = tmp_path / "prompt.txt"
+    arguments = [
+        sys.executable, str(script), "--checkpoint", str(tmp_path / "missing.pt")
+    ]
+    if case == "exclusive":
+        prompt_path.write_text("file", encoding="utf-8")
+        arguments += ["--prompt", "inline", "--prompt-file", str(prompt_path)]
+        expected = "not allowed with argument"
+    elif case == "missing":
+        arguments += ["--prompt-file", str(prompt_path)]
+        expected = "cannot read --prompt-file"
+    else:
+        prompt_path.write_bytes(b"\xff")
+        arguments += ["--prompt-file", str(prompt_path)]
+        expected = "cannot read --prompt-file"
+
+    result = subprocess.run(arguments, capture_output=True, text=True, timeout=30)
+
+    assert result.returncode == 2
+    assert expected in result.stderr
 
 
 def test_generate_cli_uses_dedicated_sampling_generator(tmp_path, monkeypatch) -> None:

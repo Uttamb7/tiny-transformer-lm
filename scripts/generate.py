@@ -57,7 +57,12 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=Path, required=True)
     default_tokenizer = REPO_ROOT / "data_raw" / "tinyshakespeare" / "tokenizer.json"
     parser.add_argument("--tokenizer", type=Path, default=default_tokenizer)
-    parser.add_argument("--prompt", type=str, default="\n")
+    prompt_source = parser.add_mutually_exclusive_group()
+    prompt_source.add_argument("--prompt", type=str)
+    prompt_source.add_argument(
+        "--prompt-file", type=Path,
+        help="read the prompt from a UTF-8 file instead of --prompt",
+    )
     parser.add_argument(
         "--allowed-special", action="append", default=[], metavar="TOKEN",
         help="reserved tokenizer token to recognize in the prompt (repeatable)",
@@ -115,6 +120,13 @@ def main() -> None:
     parser.add_argument("--device", type=str, default=default_device)
     args = parser.parse_args()
 
+    prompt = args.prompt if args.prompt is not None else "\n"
+    if args.prompt_file is not None:
+        try:
+            prompt = args.prompt_file.read_bytes().decode("utf-8")
+        except (OSError, UnicodeError) as error:
+            parser.error(f"cannot read --prompt-file {args.prompt_file}: {error}")
+
     tokenizer = ByteLevelBPETokenizer.load(args.tokenizer)
     if args.eos_token is not None and args.eos_token not in tokenizer.special_tokens:
         parser.error(f"unknown special token: {args.eos_token!r}")
@@ -127,7 +139,7 @@ def main() -> None:
         parser.error("--min-new-tokens requires --eos-token")
     eos_token_id = tokenizer.special_tokens.get(args.eos_token)
     try:
-        prompt_ids = tokenizer.encode(args.prompt, allowed_special=args.allowed_special)
+        prompt_ids = tokenizer.encode(prompt, allowed_special=args.allowed_special)
         stop_sequences = [
             tokenizer.encode(stop, allowed_special=args.allowed_special) for stop in args.stop
         ]
