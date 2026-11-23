@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -202,6 +203,22 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     assert batched.returncode == 0, batched.stderr
     assert batched.stdout.count("--- sample ") == 3
     assert batched.stdout.count("Hi" + "<|endoftext|>" * 3) == 3
+    json_prompt = "Hé\n"
+    json_single = run("--json", "--prompt", json_prompt, "--max-new-tokens", "0")
+    assert json_single.returncode == 0, json_single.stderr
+    assert json.loads(json_single.stdout) == {
+        "step": 0,
+        "val_loss": 0.0,
+        "completions": [json_prompt],
+    }
+    assert "loaded checkpoint" not in json_single.stdout
+    assert "--- sample" not in json_single.stdout
+    json_batched = run(
+        "--json", "--prompt", json_prompt, "--max-new-tokens", "0", "--num-samples", "2",
+    )
+    assert json_batched.returncode == 0, json_batched.stderr
+    assert json.loads(json_batched.stdout)["completions"] == [json_prompt, json_prompt]
+    assert "--- sample" not in json_batched.stdout
     unknown = run("--eos-token", "<missing>")
     assert unknown.returncode == 2
     assert "unknown special token" in unknown.stderr

@@ -8,6 +8,7 @@ config file to keep in sync."""
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import torch
@@ -116,6 +117,10 @@ def main() -> None:
         "--greedy", action="store_true",
         help="always choose the highest-logit eligible token instead of sampling",
     )
+    parser.add_argument(
+        "--json", action="store_true",
+        help="write checkpoint metadata and completions as one JSON object",
+    )
     default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser.add_argument("--device", type=str, default=default_device)
     args = parser.parse_args()
@@ -165,7 +170,8 @@ def main() -> None:
         else None
     )
 
-    print(f"loaded checkpoint from step {ckpt['step']} (val_loss={ckpt['val_loss']:.4f})")
+    if not args.json:
+        print(f"loaded checkpoint from step {ckpt['step']} (val_loss={ckpt['val_loss']:.4f})")
 
     idx = torch.tensor([prompt_ids], dtype=torch.long, device=args.device).repeat(
         args.num_samples, 1
@@ -201,7 +207,13 @@ def main() -> None:
         tokenizer.decode(trim_at_stop(row.tolist(), len(prompt_ids), display_stops))
         for row in out_ids
     ]
-    if args.num_samples == 1:
+    if args.json:
+        print(json.dumps({
+            "step": ckpt["step"],
+            "val_loss": ckpt["val_loss"],
+            "completions": decoded,
+        }, ensure_ascii=False))
+    elif args.num_samples == 1:
         print(decoded[0])
     else:
         for sample, text in enumerate(decoded, 1):
