@@ -199,6 +199,16 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     )
     assert stopped_text.returncode == 0, stopped_text.stderr
     assert stopped_text.stdout.splitlines()[-1] == "Hixx"
+    continuation = run(
+        "--continuation-only", "--eos-token", "<|endoftext|>",
+    )
+    assert continuation.returncode == 0, continuation.stderr
+    assert continuation.stdout.splitlines()[-1] == "<|endoftext|>"
+    continuation_text_stop = run(
+        "--continuation-only", "--suppress-special", "<|endoftext|>", "--stop", "xx",
+    )
+    assert continuation_text_stop.returncode == 0, continuation_text_stop.stderr
+    assert continuation_text_stop.stdout.splitlines()[-1] == "xx"
     batched = run("--num-samples", "3")
     assert batched.returncode == 0, batched.stderr
     assert batched.stdout.count("--- sample ") == 3
@@ -219,6 +229,19 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     assert json_batched.returncode == 0, json_batched.stderr
     assert json.loads(json_batched.stdout)["completions"] == [json_prompt, json_prompt]
     assert "--- sample" not in json_batched.stdout
+    json_continuations = run(
+        "--json", "--continuation-only", "--prompt", "Hi",
+        "--eos-token", "<|endoftext|>", "--num-samples", "2",
+    )
+    assert json_continuations.returncode == 0, json_continuations.stderr
+    assert json.loads(json_continuations.stdout)["completions"] == [
+        "<|endoftext|>", "<|endoftext|>",
+    ]
+    empty_continuation = run(
+        "--json", "--continuation-only", "--prompt", "Hi", "--max-new-tokens", "0",
+    )
+    assert empty_continuation.returncode == 0, empty_continuation.stderr
+    assert json.loads(empty_continuation.stdout)["completions"] == [""]
     unknown = run("--eos-token", "<missing>")
     assert unknown.returncode == 2
     assert "unknown special token" in unknown.stderr

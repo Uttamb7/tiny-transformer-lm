@@ -121,6 +121,10 @@ def main() -> None:
         "--json", action="store_true",
         help="write checkpoint metadata and completions as one JSON object",
     )
+    parser.add_argument(
+        "--continuation-only", action="store_true",
+        help="omit the prompt from generated output",
+    )
     default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser.add_argument("--device", type=str, default=default_device)
     args = parser.parse_args()
@@ -203,10 +207,12 @@ def main() -> None:
     display_stops = [*stop_sequences]
     if eos_token_id is not None:
         display_stops.append([eos_token_id])
-    decoded = [
-        tokenizer.decode(trim_at_stop(row.tolist(), len(prompt_ids), display_stops))
-        for row in out_ids
-    ]
+    decoded = []
+    for row in out_ids:
+        ids = trim_at_stop(row.tolist(), len(prompt_ids), display_stops)
+        if args.continuation_only:
+            ids = ids[len(prompt_ids):]
+        decoded.append(tokenizer.decode(ids))
     if args.json:
         print(json.dumps({
             "step": ckpt["step"],
