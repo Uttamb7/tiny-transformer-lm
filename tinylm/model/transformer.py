@@ -159,6 +159,10 @@ class GPT(nn.Module):
         """
         if idx.ndim != 2 or idx.size(0) < 1 or idx.size(1) < 1:
             raise ValueError("idx must be a non-empty 2D prompt tensor")
+        if idx.dtype not in (torch.int32, torch.int64):
+            raise ValueError("idx must contain integer token IDs")
+        if ((idx < 0) | (idx >= self.config.vocab_size)).any().item():
+            raise ValueError("idx token IDs must be within the model vocabulary")
         if (
             not isinstance(max_new_tokens, int)
             or isinstance(max_new_tokens, bool)

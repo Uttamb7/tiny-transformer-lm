@@ -101,6 +101,10 @@ def test_generate_appends_requested_number_of_tokens() -> None:
     [
         (torch.empty(1, 0, dtype=torch.long), {}, "non-empty 2D"),
         (torch.ones(2, dtype=torch.long), {}, "non-empty 2D"),
+        (torch.ones(1, 1), {}, "integer token IDs"),
+        (torch.tensor([[True]]), {}, "integer token IDs"),
+        (torch.tensor([[-1]]), {}, "within the model vocabulary"),
+        (torch.tensor([[64]]), {}, "within the model vocabulary"),
         (torch.ones(1, 1, dtype=torch.long), {"max_new_tokens": -1}, "nonnegative"),
         (torch.ones(1, 1, dtype=torch.long), {"max_new_tokens": True}, "nonnegative"),
         (torch.ones(1, 1, dtype=torch.long), {"temperature": 0}, "finite and positive"),
@@ -133,6 +137,9 @@ def test_generate_rejects_invalid_settings_before_forward(
 ) -> None:
     model = GPT(make_config())
     monkeypatch.setattr(model, "forward", lambda _: pytest.fail("invalid input reached model"))
+    monkeypatch.setattr(
+        model, "_forward_cached", lambda *_: pytest.fail("invalid input reached cached model")
+    )
     max_new_tokens = kwargs.get("max_new_tokens", 1)
     settings = {key: value for key, value in kwargs.items() if key != "max_new_tokens"}
     with pytest.raises(ValueError, match=message):
@@ -141,8 +148,9 @@ def test_generate_rejects_invalid_settings_before_forward(
 
 def test_generate_zero_token_budget_is_a_noop() -> None:
     model = GPT(make_config())
-    prompt = torch.tensor([[1, 2]])
-    assert torch.equal(model.generate(prompt, max_new_tokens=0), prompt)
+    for dtype in (torch.int32, torch.int64):
+        prompt = torch.tensor([[0, model.config.vocab_size - 1]], dtype=dtype)
+        assert torch.equal(model.generate(prompt, max_new_tokens=0), prompt)
 
 
 def test_greedy_generation_selects_each_rows_highest_eligible_logit(monkeypatch) -> None:
