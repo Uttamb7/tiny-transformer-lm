@@ -229,6 +229,14 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     assert json_batched.returncode == 0, json_batched.stderr
     assert json.loads(json_batched.stdout)["completions"] == [json_prompt, json_prompt]
     assert "--- sample" not in json_batched.stdout
+    json_tokens = run(
+        "--json", "--include-token-ids", "--prompt", json_prompt,
+        "--max-new-tokens", "0", "--num-samples", "2",
+    )
+    assert json_tokens.returncode == 0, json_tokens.stderr
+    assert json.loads(json_tokens.stdout)["token_ids"] == [
+        tokenizer.encode(json_prompt), tokenizer.encode(json_prompt),
+    ]
     json_continuations = run(
         "--json", "--continuation-only", "--prompt", "Hi",
         "--eos-token", "<|endoftext|>", "--num-samples", "2",
@@ -237,11 +245,18 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     assert json.loads(json_continuations.stdout)["completions"] == [
         "<|endoftext|>", "<|endoftext|>",
     ]
+    json_continuation_tokens = run(
+        "--json", "--include-token-ids", "--continuation-only", "--prompt", "Hi",
+        "--eos-token", "<|endoftext|>", "--num-samples", "2",
+    )
+    assert json.loads(json_continuation_tokens.stdout)["token_ids"] == [[eos], [eos]]
     empty_continuation = run(
-        "--json", "--continuation-only", "--prompt", "Hi", "--max-new-tokens", "0",
+        "--json", "--include-token-ids", "--continuation-only", "--prompt", "Hi",
+        "--max-new-tokens", "0",
     )
     assert empty_continuation.returncode == 0, empty_continuation.stderr
     assert json.loads(empty_continuation.stdout)["completions"] == [""]
+    assert json.loads(empty_continuation.stdout)["token_ids"] == [[]]
     unknown = run("--eos-token", "<missing>")
     assert unknown.returncode == 2
     assert "unknown special token" in unknown.stderr
@@ -263,6 +278,12 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     )
     assert invalid_samples.returncode == 2
     assert "must be a positive integer" in invalid_samples.stderr
+    token_ids_without_json = subprocess.run(
+        [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
+         "--include-token-ids"], capture_output=True, text=True, timeout=30,
+    )
+    assert token_ids_without_json.returncode == 2
+    assert "--include-token-ids requires --json" in token_ids_without_json.stderr
     empty_stop = subprocess.run(
         [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
          "--tokenizer", str(tokenizer_path), "--stop", ""],

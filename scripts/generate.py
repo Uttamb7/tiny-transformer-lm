@@ -122,12 +122,19 @@ def main() -> None:
         help="write checkpoint metadata and completions as one JSON object",
     )
     parser.add_argument(
+        "--include-token-ids", action="store_true",
+        help="include displayed token IDs in --json output",
+    )
+    parser.add_argument(
         "--continuation-only", action="store_true",
         help="omit the prompt from generated output",
     )
     default_device = "cuda" if torch.cuda.is_available() else "cpu"
     parser.add_argument("--device", type=str, default=default_device)
     args = parser.parse_args()
+
+    if args.include_token_ids and not args.json:
+        parser.error("--include-token-ids requires --json")
 
     prompt = args.prompt if args.prompt is not None else "\n"
     if args.prompt_file is not None:
@@ -208,17 +215,22 @@ def main() -> None:
     if eos_token_id is not None:
         display_stops.append([eos_token_id])
     decoded = []
+    displayed_ids = []
     for row in out_ids:
         ids = trim_at_stop(row.tolist(), len(prompt_ids), display_stops)
         if args.continuation_only:
             ids = ids[len(prompt_ids):]
+        displayed_ids.append(ids)
         decoded.append(tokenizer.decode(ids))
     if args.json:
-        print(json.dumps({
+        result = {
             "step": ckpt["step"],
             "val_loss": ckpt["val_loss"],
             "completions": decoded,
-        }, ensure_ascii=False))
+        }
+        if args.include_token_ids:
+            result["token_ids"] = displayed_ids
+        print(json.dumps(result, ensure_ascii=False))
     elif args.num_samples == 1:
         print(decoded[0])
     else:
