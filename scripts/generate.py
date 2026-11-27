@@ -126,6 +126,10 @@ def main() -> None:
         help="include displayed token IDs in --json output",
     )
     parser.add_argument(
+        "--include-logprobs", action="store_true",
+        help="include constrained continuation token log probabilities with JSON token IDs",
+    )
+    parser.add_argument(
         "--continuation-only", action="store_true",
         help="omit the prompt from generated output",
     )
@@ -135,6 +139,8 @@ def main() -> None:
 
     if args.include_token_ids and not args.json:
         parser.error("--include-token-ids requires --json")
+    if args.include_logprobs and not args.include_token_ids:
+        parser.error("--include-logprobs requires --include-token-ids")
 
     prompt = args.prompt if args.prompt is not None else "\n"
     if args.prompt_file is not None:
@@ -189,7 +195,7 @@ def main() -> None:
     )
 
     try:
-        out_ids = model.generate(
+        generated = model.generate(
             idx,
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature,
@@ -208,19 +214,37 @@ def main() -> None:
             stop_sequences=stop_sequences,
             do_sample=not args.greedy,
             generator=generator,
+            return_logprobs=args.include_logprobs,
         )
     except ValueError as error:
         parser.error(str(error))
+    if args.include_logprobs:
+        assert isinstance(generated, tuple)
+        out_ids, generated_logprobs = generated
+    else:
+        assert isinstance(generated, torch.Tensor)
+        out_ids, generated_logprobs = generated, None
     display_stops = [*stop_sequences]
     if eos_token_id is not None:
         display_stops.append([eos_token_id])
     decoded = []
     displayed_ids = []
-    for row in out_ids:
+    displayed_logprobs: list[list[float | None]] = []
+    for row_number, row in enumerate(out_ids):
         ids = trim_at_stop(row.tolist(), len(prompt_ids), display_stops)
+        continuation_length = len(ids) - len(prompt_ids)
+        scores = (
+            generated_logprobs[row_number][:continuation_length]
+            if generated_logprobs is not None else []
+        )
+        aligned_scores: list[float | None] = []
         if args.continuation_only:
             ids = ids[len(prompt_ids):]
+        else:
+            aligned_scores.extend([None] * len(prompt_ids))
+        aligned_scores.extend(scores)
         displayed_ids.append(ids)
+        displayed_logprobs.append(aligned_scores)
         decoded.append(tokenizer.decode(ids))
     if args.json:
         result = {
@@ -230,6 +254,8 @@ def main() -> None:
         }
         if args.include_token_ids:
             result["token_ids"] = displayed_ids
+        if args.include_logprobs:
+            result["token_logprobs"] = displayed_logprobs
         print(json.dumps(result, ensure_ascii=False))
     elif args.num_samples == 1:
         print(decoded[0])

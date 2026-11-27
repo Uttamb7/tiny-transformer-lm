@@ -130,6 +130,7 @@ def test_generate_appends_requested_number_of_tokens() -> None:
         (torch.ones(1, 1, dtype=torch.long), {"stop_sequences": [[64]]}, "vocabulary"),
         (torch.ones(1, 1, dtype=torch.long), {"stop_sequences": [1]}, "token sequences"),
         (torch.ones(1, 1, dtype=torch.long), {"do_sample": "no"}, "boolean"),
+        (torch.ones(1, 1, dtype=torch.long), {"return_logprobs": "yes"}, "boolean"),
     ],
 )
 def test_generate_rejects_invalid_settings_before_forward(
@@ -151,6 +152,32 @@ def test_generate_zero_token_budget_is_a_noop() -> None:
     for dtype in (torch.int32, torch.int64):
         prompt = torch.tensor([[0, model.config.vocab_size - 1]], dtype=dtype)
         assert torch.equal(model.generate(prompt, max_new_tokens=0), prompt)
+        output, logprobs = model.generate(
+            prompt, max_new_tokens=0, return_logprobs=True
+        )
+        assert torch.equal(output, prompt)
+        assert logprobs == [[]]
+
+
+@pytest.mark.parametrize("do_sample", [False, True])
+def test_generate_reports_selected_constrained_logprobs(monkeypatch, do_sample) -> None:
+    model = GPT(make_config())
+    logits = torch.full((1, 1, model.config.vocab_size), -100.0)
+    logits[0, 0, 2], logits[0, 0, 3] = 2.0, 1.0
+    monkeypatch.setattr(model, "forward", lambda idx: (logits.clone(), None))
+    if do_sample:
+        monkeypatch.setattr(
+            torch, "multinomial", lambda probs, **kwargs: torch.tensor([[2]])
+        )
+
+    output, logprobs = model.generate(
+        torch.tensor([[1]]), max_new_tokens=1, temperature=2.0,
+        do_sample=do_sample, use_cache=False, return_logprobs=True,
+    )
+
+    expected = torch.log_softmax(logits[0, 0] / 2.0, dim=-1)[2].item()
+    assert output.tolist() == [[1, 2]]
+    assert logprobs[0] == pytest.approx([expected])
 
 
 def test_greedy_generation_selects_each_rows_highest_eligible_logit(monkeypatch) -> None:
@@ -469,6 +496,14 @@ def test_generate_pads_finished_rows_and_respects_budget(monkeypatch, budget) ->
     count = min(budget, 3)
     assert out.tolist() == [[1, 2] + [0] * count, [2, 3] + [4, 5, 0][:count]]
     assert len(calls) == count
+
+    calls.clear()
+    scored, logprobs = model.generate(
+        prompt, max_new_tokens=budget, eos_token_id=0, top_k=1,
+        use_cache=False, return_logprobs=True,
+    )
+    assert torch.equal(scored, out)
+    assert [len(row) for row in logprobs] == [min(budget, 1), count]
 
 
 @pytest.mark.parametrize("eos_token_id", [None, 63])

@@ -151,7 +151,8 @@ class GPT(nn.Module):
         use_cache: bool = True,
         generator: torch.Generator | None = None,
         do_sample: bool = True,
-    ) -> torch.Tensor:
+        return_logprobs: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, list[list[float]]]:
         """Append tokens, optionally stopping each row at a newly generated EOS.
 
         Finished rows retain EOS and are padded with it until every row finishes
@@ -259,6 +260,8 @@ class GPT(nn.Module):
                 stops.append(tuple(sequence))
         if not isinstance(do_sample, bool):
             raise ValueError("do_sample must be a boolean")
+        if not isinstance(return_logprobs, bool):
+            raise ValueError("return_logprobs must be a boolean")
         if eos_token_id is not None and (
             not isinstance(eos_token_id, int)
             or isinstance(eos_token_id, bool)
@@ -280,6 +283,7 @@ class GPT(nn.Module):
         self.eval()
         finished = torch.zeros(idx.size(0), dtype=torch.bool, device=idx.device)
         padding_ids = torch.zeros(idx.size(0), dtype=torch.long, device=idx.device)
+        token_logprobs: list[list[float]] = [[] for _ in range(idx.size(0))]
         cache: list[KVCache] | None = None
         for generated in range(max_new_tokens):
             if use_cache and cache is not None and cache[0][0].size(2) < self.config.block_size:
@@ -351,11 +355,16 @@ class GPT(nn.Module):
                     1, sorted_idx, sorted_logits
                 )
 
+            probs = F.softmax(logits, dim=-1)
             if do_sample:
-                probs = F.softmax(logits, dim=-1)
                 next_id = torch.multinomial(probs, num_samples=1, generator=generator)
             else:
                 next_id = torch.argmax(logits, dim=-1, keepdim=True)
+            if return_logprobs:
+                selected = F.log_softmax(logits, dim=-1).gather(1, next_id)[:, 0]
+                for row, value in enumerate(selected.tolist()):
+                    if not finished[row].item():
+                        token_logprobs[row].append(value)
             if stops:
                 next_id = torch.where(finished[:, None], padding_ids[:, None], next_id)
             idx = torch.cat((idx, next_id), dim=1)
@@ -370,4 +379,4 @@ class GPT(nn.Module):
                 finished |= newly_finished
             if stops and finished.all():
                 break
-        return idx
+        return (idx, token_logprobs) if return_logprobs else idx

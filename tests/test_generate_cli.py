@@ -250,6 +250,22 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
         "--eos-token", "<|endoftext|>", "--num-samples", "2",
     )
     assert json.loads(json_continuation_tokens.stdout)["token_ids"] == [[eos], [eos]]
+    json_logprobs = run(
+        "--json", "--include-token-ids", "--include-logprobs", "--prompt", "Hi",
+        "--eos-token", "<|endoftext|>", "--num-samples", "2", "--top-k", "1",
+    )
+    logprob_result = json.loads(json_logprobs.stdout)
+    assert logprob_result["token_ids"] == [
+        tokenizer.encode("Hi") + [eos], tokenizer.encode("Hi") + [eos],
+    ]
+    assert logprob_result["token_logprobs"] == [
+        [None, None, 0.0], [None, None, 0.0],
+    ]
+    continuation_logprobs = run(
+        "--json", "--include-token-ids", "--include-logprobs", "--continuation-only",
+        "--prompt", "Hi", "--eos-token", "<|endoftext|>", "--top-k", "1",
+    )
+    assert json.loads(continuation_logprobs.stdout)["token_logprobs"] == [[0.0]]
     empty_continuation = run(
         "--json", "--include-token-ids", "--continuation-only", "--prompt", "Hi",
         "--max-new-tokens", "0",
@@ -257,6 +273,11 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     assert empty_continuation.returncode == 0, empty_continuation.stderr
     assert json.loads(empty_continuation.stdout)["completions"] == [""]
     assert json.loads(empty_continuation.stdout)["token_ids"] == [[]]
+    empty_logprobs = run(
+        "--json", "--include-token-ids", "--include-logprobs", "--continuation-only",
+        "--prompt", "Hi", "--max-new-tokens", "0",
+    )
+    assert json.loads(empty_logprobs.stdout)["token_logprobs"] == [[]]
     unknown = run("--eos-token", "<missing>")
     assert unknown.returncode == 2
     assert "unknown special token" in unknown.stderr
@@ -284,6 +305,12 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     )
     assert token_ids_without_json.returncode == 2
     assert "--include-token-ids requires --json" in token_ids_without_json.stderr
+    logprobs_without_tokens = subprocess.run(
+        [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
+         "--json", "--include-logprobs"], capture_output=True, text=True, timeout=30,
+    )
+    assert logprobs_without_tokens.returncode == 2
+    assert "--include-logprobs requires --include-token-ids" in logprobs_without_tokens.stderr
     empty_stop = subprocess.run(
         [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
          "--tokenizer", str(tokenizer_path), "--stop", ""],
