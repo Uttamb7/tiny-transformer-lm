@@ -144,6 +144,41 @@ def test_generate_cli_requests_greedy_decoding(tmp_path, monkeypatch) -> None:
     assert captured["presence_penalty"] == 0.4
 
 
+def test_generate_cli_encodes_suppressed_text_with_prompt_policy(tmp_path, monkeypatch) -> None:
+    tokenizer = ByteLevelBPETokenizer.train("", vocab_size=256)
+    tokenizer_path = tmp_path / "tokenizer.json"
+    tokenizer.save(tokenizer_path)
+    captured = {}
+
+    class Model:
+        config = GPTConfig(vocab_size=tokenizer.vocab_size)
+
+        def generate(self, idx, **options):
+            captured.update(options)
+            return idx
+
+    monkeypatch.setitem(
+        generate_cli["main"].__globals__,
+        "load_model",
+        lambda checkpoint_path, device: (Model(), {"step": 0, "val_loss": 0.0}),
+    )
+    monkeypatch.setattr(
+        sys, "argv",
+        [
+            "generate.py", "--checkpoint", str(tmp_path / "unused.pt"),
+            "--tokenizer", str(tokenizer_path), "--device", "cpu",
+            "--allowed-special", "<|endoftext|>",
+            "--suppress-text", "ab", "--suppress-text", "<|endoftext|>",
+        ],
+    )
+    generate_cli["main"]()
+
+    assert captured["suppress_sequences"] == [
+        tokenizer.encode("ab"),
+        [tokenizer.special_tokens["<|endoftext|>"]],
+    ]
+
+
 def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     tokenizer = ByteLevelBPETokenizer.train("", vocab_size=256)
     tokenizer_path = tmp_path / "tokenizer.json"
@@ -179,6 +214,11 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     suppressed = run("--suppress-special", "<|endoftext|>")
     assert suppressed.returncode == 0, suppressed.stderr
     assert suppressed.stdout.splitlines()[-1] == "Hixxx"
+    suppressed_text = run(
+        "--allowed-special", "<|endoftext|>", "--suppress-text", "<|endoftext|>"
+    )
+    assert suppressed_text.returncode == 0, suppressed_text.stderr
+    assert suppressed_text.stdout.splitlines()[-1] == "Hixxx"
     special_prompt = run(
         "--prompt", "<|endoftext|>", "--allowed-special", "<|endoftext|>",
         "--no-repeat-ngram-size", "1", "--max-new-tokens", "1",
@@ -318,6 +358,13 @@ def test_generate_cli_optional_eos_and_unknown_token(tmp_path: Path) -> None:
     )
     assert empty_stop.returncode == 2
     assert "must encode to at least one token" in empty_stop.stderr
+    empty_suppression = subprocess.run(
+        [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
+         "--tokenizer", str(tokenizer_path), "--suppress-text", ""],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert empty_suppression.returncode == 2
+    assert "must encode to at least one token" in empty_suppression.stderr
     invalid_ngram = subprocess.run(
         [sys.executable, command[1], "--checkpoint", str(tmp_path / "missing.pt"),
          "--no-repeat-ngram-size", "0"], capture_output=True, text=True, timeout=30,

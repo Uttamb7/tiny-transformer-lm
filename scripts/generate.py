@@ -101,6 +101,10 @@ def main() -> None:
         help="forbid a tokenizer special token during generation (repeatable)",
     )
     parser.add_argument(
+        "--suppress-text", action="append", default=[], metavar="TEXT",
+        help="forbid completing this generated token sequence (repeatable)",
+    )
+    parser.add_argument(
         "--eos-token", type=str, default=None,
         help="stop after generating this tokenizer special token (e.g. <|endoftext|>)",
     )
@@ -165,10 +169,16 @@ def main() -> None:
         stop_sequences = [
             tokenizer.encode(stop, allowed_special=args.allowed_special) for stop in args.stop
         ]
+        suppress_sequences = [
+            tokenizer.encode(text, allowed_special=args.allowed_special)
+            for text in args.suppress_text
+        ]
     except ValueError as error:
         parser.error(str(error))
     if any(not sequence for sequence in stop_sequences):
         parser.error("--stop values must encode to at least one token")
+    if any(not sequence for sequence in suppress_sequences):
+        parser.error("--suppress-text values must encode to at least one token")
     model, ckpt = load_model(args.checkpoint, args.device)
     if tokenizer.vocab_size != model.config.vocab_size:
         parser.error(
@@ -211,6 +221,7 @@ def main() -> None:
             suppress_token_ids=[
                 tokenizer.special_tokens[token] for token in args.suppress_special
             ],
+            suppress_sequences=suppress_sequences,
             stop_sequences=stop_sequences,
             do_sample=not args.greedy,
             generator=generator,

@@ -126,6 +126,9 @@ def test_generate_appends_requested_number_of_tokens() -> None:
             "vocabulary token IDs",
         ),
         (torch.ones(1, 1, dtype=torch.long), {"suppress_token_ids": 1}, "collection"),
+        (torch.ones(1, 1, dtype=torch.long), {"suppress_sequences": [[]]}, "non-empty"),
+        (torch.ones(1, 1, dtype=torch.long), {"suppress_sequences": [[64]]}, "vocabulary"),
+        (torch.ones(1, 1, dtype=torch.long), {"suppress_sequences": [1]}, "token sequences"),
         (torch.ones(1, 1, dtype=torch.long), {"stop_sequences": [[]]}, "non-empty"),
         (torch.ones(1, 1, dtype=torch.long), {"stop_sequences": [[64]]}, "vocabulary"),
         (torch.ones(1, 1, dtype=torch.long), {"stop_sequences": [1]}, "token sequences"),
@@ -382,6 +385,28 @@ def test_generate_suppresses_tokens_and_reports_exhaustion(monkeypatch) -> None:
             prompt[:1], max_new_tokens=1,
             suppress_token_ids=range(model.config.vocab_size), use_cache=False,
         )
+
+
+def test_generate_suppresses_sequence_completions_per_row(monkeypatch) -> None:
+    model = GPT(make_config())
+
+    def forward(idx):
+        logits = torch.full((idx.size(0), 1, model.config.vocab_size), -100.0)
+        logits[:, :, 5], logits[:, :, 2], logits[:, :, 3], logits[:, :, 4] = (
+            11.0, 10.0, 9.0, 8.0
+        )
+        return logits, None
+
+    monkeypatch.setattr(model, "forward", forward)
+    prompt = torch.tensor([[1], [2]])
+    default = model.generate(prompt, max_new_tokens=1, top_k=1, use_cache=False)
+    constrained = model.generate(
+        prompt, max_new_tokens=1, top_k=1,
+        suppress_sequences=[[5], [2, 2], [2, 3]], use_cache=False,
+    )
+
+    assert default[:, -1].tolist() == [5, 5]
+    assert constrained[:, -1].tolist() == [2, 4]
 
 
 def test_num_params_excludes_positional_embedding_by_default() -> None:

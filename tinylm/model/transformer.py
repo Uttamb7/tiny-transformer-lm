@@ -147,6 +147,7 @@ class GPT(nn.Module):
         presence_penalty: float = 0.0,
         no_repeat_ngram_size: int | None = None,
         suppress_token_ids: Collection[int] | None = None,
+        suppress_sequences: Collection[Collection[int]] | None = None,
         stop_sequences: Collection[Collection[int]] | None = None,
         use_cache: bool = True,
         generator: torch.Generator | None = None,
@@ -234,15 +235,15 @@ class GPT(nn.Module):
                 for token_id in suppressed
             ):
                 raise ValueError("suppress_token_ids must contain only model vocabulary token IDs")
-        if stop_sequences is None:
-            stops: list[tuple[int, ...]] = []
-        elif isinstance(stop_sequences, (str, bytes)) or not isinstance(
-            stop_sequences, Collection
-        ):
-            raise ValueError("stop_sequences must be a collection of token sequences")
-        else:
-            stops = []
-            for sequence in stop_sequences:
+        def validate_sequences(
+            sequences: Collection[Collection[int]] | None, name: str
+        ) -> list[tuple[int, ...]]:
+            if sequences is None:
+                return []
+            if isinstance(sequences, (str, bytes)) or not isinstance(sequences, Collection):
+                raise ValueError(f"{name} must be a collection of token sequences")
+            validated = []
+            for sequence in sequences:
                 if (
                     isinstance(sequence, (str, bytes))
                     or not isinstance(sequence, Collection)
@@ -255,9 +256,13 @@ class GPT(nn.Module):
                     )
                 ):
                     raise ValueError(
-                        "stop_sequences must contain non-empty model vocabulary token sequences"
+                        f"{name} must contain non-empty model vocabulary token sequences"
                     )
-                stops.append(tuple(sequence))
+                validated.append(tuple(sequence))
+            return validated
+
+        blocked = validate_sequences(suppress_sequences, "suppress_sequences")
+        stops = validate_sequences(stop_sequences, "stop_sequences")
         if not isinstance(do_sample, bool):
             raise ValueError("do_sample must be a boolean")
         if not isinstance(return_logprobs, bool):
@@ -313,6 +318,18 @@ class GPT(nn.Module):
 
             if suppressed:
                 logits[:, list(suppressed)] = float("-inf")
+
+            if blocked:
+                for row in range(idx.size(0)):
+                    if finished[row].item():
+                        continue
+                    tokens = idx[row].tolist()
+                    for sequence in blocked:
+                        blocked_prefix = sequence[:-1]
+                        if not blocked_prefix or tokens[-len(blocked_prefix):] == list(
+                            blocked_prefix
+                        ):
+                            logits[row, sequence[-1]] = float("-inf")
 
             if no_repeat_ngram_size is not None:
                 size = no_repeat_ngram_size
